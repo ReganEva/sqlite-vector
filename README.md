@@ -15,15 +15,15 @@
 
 ## Why Use SQLite-Vector?
 
-| Feature                    | SQLite-Vector | Traditional Solutions                      |
-| -------------------------- | ------------- | ------------------------------------------ |
-| Works with ordinary tables | ✅             | ❌ (usually require special virtual tables) |
-| Requires preindexing       | ❌             | ✅ (can take hours for large datasets)      |
-| Requires external server   | ❌             | ✅ (often needs Redis/FAISS/Weaviate/etc.)  |
-| Memory-efficient           | ✅             | ❌                                          |
-| Easy to use SQL            | ✅             | ❌ (often complex JOINs, subqueries)        |
-| Offline/Edge ready         | ✅             | ❌                                          |
-| Cross-platform             | ✅             | ❌                                          |
+| Feature                      | SQLite-Vector | Traditional Solutions                      |
+| ---------------------------- | ------------- | ------------------------------------------ |
+| Works with ordinary tables   | ✅             | ❌ (usually require special virtual tables) |
+| Doesn't need preindexing     | ✅             | ❌ (can take hours for large datasets)      |
+| Doesn't need external server | ✅             | ❌ (often needs Redis/FAISS/Weaviate/etc.)  |
+| Memory-efficient             | ✅             | ❌                                          |
+| Easy to use SQL              | ✅             | ❌ (often complex JOINs, subqueries)        |
+| Offline/Edge ready           | ✅             | ❌                                          |
+| Cross-platform               | ✅             | ❌                                          |
 
 Unlike other vector databases or extensions that require complex setup, SQLite-Vector **just works** with your existing database schema and tools.
 
