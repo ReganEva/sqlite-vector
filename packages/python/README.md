@@ -16,9 +16,9 @@ For detailed information on all available functions, their parameters, and examp
 
 | Platform      | Arch         | Subpackage name          | Binary name  |
 | ------------- | ------------ | ------------------------ | ------------ |
-| Linux (CPU)   | x86_64/arm64 | sqlite-vector.binaries   | vector.so    |
-| Windows (CPU) | x86_64       | sqlite-vector.binaries   | vector.dll   |
-| macOS (CPU)   | x86_64/arm64 | sqlite-vector.binaries   | vector.dylib |
+| Linux (CPU)   | x86_64/arm64 | sqlite_vector.binaries   | vector.so    |
+| Windows (CPU) | x86_64       | sqlite_vector.binaries   | vector.dll   |
+| macOS (CPU)   | x86_64/arm64 | sqlite_vector.binaries   | vector.dylib |
 
 ## Usage
 

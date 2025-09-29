@@ -7,6 +7,12 @@ on:
         description: "Version to use for the Python package (e.g. 0.9.9)"
         required: true
         type: string
+      test-pypi:
+        description: "Publish to Test PyPI"
+        required: false
+        type: boolean
+        default: false
+
   workflow_run:
     workflows: ["Build, Test and Release"]
     types:
@@ -104,4 +110,4 @@ jobs:
           # Avoid workflow to fail if the version has already been published
           skip-existing: true
           # Upload to Test Pypi for testing
-          #repository-url: https://test.pypi.org/legacy/
+          repository-url: ${{ github.event.inputs.test-pypi == 'true' && 'https://test.pypi.org/legacy/' || '' }}

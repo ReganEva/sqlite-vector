@@ -31,7 +31,7 @@ BINARY_NAME = {
     "macosx_11_0_arm64": "vector.dylib",
 }
 
-BINARIES_DIR = Path(__file__).parent / "src/sqlite-vector/binaries"
+BINARIES_DIR = Path(__file__).parent / "src/sqlite_vector/binaries"
 
 
 def download_and_extract(artifact_name, bin_name, version):
