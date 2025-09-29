@@ -64,6 +64,13 @@ jobs:
 
       - uses: actions/checkout@v4.2.2
 
+      - name: android setup java
+        if: matrix.name == 'android-aar'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: windows install dependencies
         if: matrix.name == 'windows'
         run: choco install sqlite -y
