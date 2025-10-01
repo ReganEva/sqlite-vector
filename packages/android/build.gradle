@@ -91,8 +91,8 @@ afterEvaluate {
 
         repositories {
             maven {
-                name = "Central"
-                url = "https://central.sonatype.com/api/v1/publisher/upload"
+                name = "OSSRH"
+                url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
                 credentials {
                     username = project.findProperty("MAVEN_CENTRAL_USERNAME") ?: ""
                     password = project.findProperty("MAVEN_CENTRAL_TOKEN") ?: ""

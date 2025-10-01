@@ -259,7 +259,11 @@ jobs:
 
       - name: release android aar to maven central
         if: steps.tag.outputs.version != ''
-        run: cd packages/android && ./gradlew publishReleasePublicationToCentralRepository -PVERSION=${{ steps.tag.outputs.version }}
+        run: |
+          echo "Maven Central Username length: ${#MAVEN_CENTRAL_USERNAME}"
+          echo "Maven Central Token length: ${#MAVEN_CENTRAL_TOKEN}"
+          echo "Signing key length: ${#SIGNING_KEY}"
+          cd packages/android && ./gradlew publishReleasePublicationToOSSRHRepository -PVERSION=${{ steps.tag.outputs.version }}
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
