@@ -9,6 +9,7 @@ buildscript {
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
 
 android {
     namespace 'ai.sqlite.vector'
@@ -44,5 +45,18 @@ repositories {
 }
 
 dependencies {
-    api 'com.github.requery:sqlite-android:3.49.0'
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                groupId = 'ai.sqlite'
+                artifactId = 'vector'
+                version = project.hasProperty('VERSION') ? project.VERSION : ['make', 'version'].execute(null, file('../..')).text.trim()
+
+                artifact bundleReleaseAar
+            }
+        }
+    }
 }
