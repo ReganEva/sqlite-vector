@@ -5,14 +5,11 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.5.2'
-        classpath 'com.gradleup.central:central-publishing:0.4.0'
     }
 }
 
 apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
-apply plugin: 'signing'
-apply plugin: 'com.gradleup.central.publish'
 
 android {
     namespace 'ai.sqlite.vector'
@@ -50,44 +47,6 @@ repositories {
 dependencies {
 }
 
-centralPublishing {
-    username = project.findProperty("MAVEN_CENTRAL_USERNAME") ?: ""
-    password = project.findProperty("MAVEN_CENTRAL_TOKEN") ?: ""
-
-    pom {
-        groupId = 'ai.sqlite'
-        artifactId = 'vector'
-        version = project.hasProperty('VERSION') ? project.VERSION : ['make', 'version'].execute(null, file('../..')).text.trim()
-
-        name = 'SQLite Vector'
-        description = 'A cross-platform, ultra-efficient SQLite extension that brings vector search capabilities to your embedded database. Works seamlessly on iOS, Android, Windows, Linux, and macOS, using just 30MB of memory by default.'
-        url = 'https://github.com/sqliteai/sqlite-vector'
-
-        licenses {
-            license {
-                name = 'Elastic License 2.0'
-                url = 'https://www.elastic.co/licensing/elastic-license'
-            }
-        }
-
-        developers {
-            developer {
-                id = 'sqliteai'
-                name = 'SQLite Cloud, Inc.'
-                email = 'info@sqlitecloud.io'
-                organization = 'SQLite Cloud, Inc.'
-                organizationUrl = 'https://sqlite.ai'
-            }
-        }
-
-        scm {
-            connection = 'scm:git:git://github.com/sqliteai/sqlite-vector.git'
-            developerConnection = 'scm:git:ssh://github.com/sqliteai/sqlite-vector.git'
-            url = 'https://github.com/sqliteai/sqlite-vector'
-        }
-    }
-}
-
 afterEvaluate {
     publishing {
         publications {
@@ -99,15 +58,5 @@ afterEvaluate {
                 artifact bundleReleaseAar
             }
         }
-    }
-}
-
-signing {
-    def signingKey = project.findProperty("SIGNING_KEY")
-    def signingPassword = project.findProperty("SIGNING_PASSWORD")
-
-    if (signingKey && signingPassword) {
-        useInMemoryPgpKeys(signingKey, signingPassword)
-        sign publishing.publications.release
     }
 }
