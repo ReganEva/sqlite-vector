@@ -186,8 +186,8 @@ aar:
 	mv $(DIST_DIR)/vector.so $(AAR_ARM)
 	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=x86_64
 	mv $(DIST_DIR)/vector.so $(AAR_X86)
-	cd packages/android && gradle assembleRelease
-	mv packages/android/build/outputs/aar/*.aar $(DIST_DIR)/vector.aar
+	cd packages/android && ./gradlew clean assembleRelease
+	cp packages/android/build/outputs/aar/android-release.aar $(DIST_DIR)/vector.aar
 
 version:
 	@echo $(shell sed -n 's/^#define SQLITE_VECTOR_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/sqlite-vector.h)
