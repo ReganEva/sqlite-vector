@@ -82,6 +82,8 @@ sqlite3_close(db)
 ### Android Package
 
 You can [add this project as a dependency to your Android project](https://central.sonatype.com/artifact/ai.sqlite/vector).
+
+**build.gradle (Groovy):**
 ```gradle
 repositories {
     google()
@@ -90,11 +92,32 @@ repositories {
 }
 
 dependencies {
+    // ...
 
-    ...
-    
+    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
     implementation 'com.github.requery:sqlite-android:3.49.0'
-    implementation 'ai.sqlite:vector:0.9.32' // or 'com.github.sqliteai:sqlite-vector:0.9.32'
+    // Both packages below are identical - use either one
+    implementation 'ai.sqlite:vector:0.9.32' // Maven Central
+    // implementation 'com.github.sqliteai:sqlite-vector:0.9.32' // JitPack (alternative)
+}
+```
+
+**build.gradle.kts (Kotlin):**
+```kotlin
+repositories {
+    google()
+    mavenCentral()
+    maven(url = "https://jitpack.io")
+}
+
+dependencies {
+    // ...
+
+    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
+    implementation("com.github.requery:sqlite-android:3.49.0")
+    // Both packages below are identical - use either one
+    implementation("ai.sqlite:vector:0.9.32") // Maven Central
+    // implementation("com.github.sqliteai:sqlite-vector:0.9.32") // JitPack (alternative)
 }
 ```
 
@@ -103,6 +126,7 @@ After adding the package, you'll need to [enable extractNativeLibs](https://gith
 Here's an example of how to use the package:
 ```java
 import android.database.Cursor;
+import android.util.Log;
 import io.requery.android.database.sqlite.SQLiteCustomExtension;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteDatabaseConfiguration;
@@ -122,17 +146,17 @@ import java.util.Collections;
             );
 
             SQLiteDatabase db = SQLiteDatabase.openDatabase(config, null, null);
-            
+
             Cursor cursor = db.rawQuery("SELECT vector_version()", null);
             if (cursor.moveToFirst()) {
                 String version = cursor.getString(0);
-                resultTextView.setText("vector_version(): " + version);
+                Log.i("sqlite-vector", "vector_version(): " + version);
             }
             cursor.close();
             db.close();
 
         } catch (Exception e) {
-            resultTextView.setText("❌ Error: " + e.getMessage());
+            Log.e("sqlite-vector", "Error: " + e.getMessage());
         }
     }
 ```
