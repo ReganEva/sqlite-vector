@@ -48,8 +48,14 @@ ifeq ($(PLATFORM),windows)
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/vector.dylib
-	LDFLAGS += -arch x86_64 -arch arm64 -dynamiclib -undefined dynamic_lookup
-	CFLAGS += -arch x86_64 -arch arm64
+	ifndef ARCH
+		LDFLAGS += -arch x86_64 -arch arm64
+		CFLAGS += -arch x86_64 -arch arm64
+	else
+		LDFLAGS += -arch $(ARCH)
+		CFLAGS += -arch $(ARCH)
+	endif
+	LDFLAGS += -dynamiclib -undefined dynamic_lookup
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
