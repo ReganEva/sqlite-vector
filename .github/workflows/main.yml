@@ -320,6 +320,10 @@ jobs:
       - uses: softprops/action-gh-release@v2.2.1
         if: steps.tag.outputs.version != ''
         with:
+          body: |
+            # WASM Releases
+            **WASM repository**: [sqlite-wasm](https://github.com/sqliteai/sqlite-wasm)
+            **WASM package** is available on npm: [@sqliteai/sqlite-wasm](https://www.npmjs.com/package/@sqliteai/sqlite-wasm)
           generate_release_notes: true
           tag_name: ${{ steps.tag.outputs.version }}
           files: vector-*-${{ steps.tag.outputs.version }}.*
