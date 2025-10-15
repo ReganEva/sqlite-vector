@@ -58,6 +58,10 @@ SELECT vector_backend();
 Initializes the vector extension for a given table and column. This is **mandatory** before performing any vector search or quantization.
 `vector_init` must be called in every database connection that needs to perform vector operations.
 
+The target table must have a **`rowid`** (an integer primary key, either explicit or implicit).
+If the table was created using `WITHOUT ROWID`, it must have **exactly one primary key column of type `INTEGER`**.
+This ensures that each vector can be uniquely identified and efficiently referenced during search and quantization.
+
 **Parameters:**
 
 * `table` (TEXT): Name of the table containing vector data.
@@ -214,7 +218,8 @@ INSERT INTO compressed_vectors(embedding) VALUES(vector_as_u8(X'010203'));
 **Returns:** `Virtual Table (rowid, distance)`
 
 **Description:**
-Performs a brute-force nearest neighbor search using the given vector. Despite its brute-force nature, this function is highly optimized and useful for small datasets or validation.
+Performs a brute-force nearest neighbor search using the given vector. Despite its brute-force nature, this function is highly optimized and useful for small datasets (rows < 1000000) or validation.
+Since this interface only returns rowid and distance, if you need to access additional columns from the original table, you must use a SELF JOIN.
 
 **Parameters:**
 
@@ -237,7 +242,7 @@ FROM vector_full_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]')
 **Returns:** `Virtual Table (rowid, distance)`
 
 **Description:**
-Performs a fast approximate nearest neighbor search using the pre-quantized data. This is the **recommended query method** for large datasets due to its excellent speed/recall/memory trade-off.
+Performs a fast approximate nearest neighbor search using the pre-quantized data. This is the **recommended query method** for large datasets due to its excellent speed/recall/memory trade-off. Since this interface only returns rowid and distance, if you need to access additional columns from the original table, you must use a SELF JOIN.
 
 You **must run `vector_quantize()`** before using `vector_quantize_scan()` and when data initialized for vectors changes.
 
@@ -271,7 +276,8 @@ FROM vector_quantize_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.
 
 **Description:**
 These streaming interfaces provide the same functionality as `vector_full_scan` and `vector_quantize_scan`, respectively, but are designed for incremental or filtered processing of results.
-Unlike their non-streaming counterparts, these functions **omit the fourth parameter (`k`)** and allow you to use standard SQL clauses such as `WHERE` and `LIMIT` to control filtering and result count.
+
+Unlike their non-streaming counterparts, these functions **omit the fourth parameter (`k`)** and allow you to use standard SQL clauses such as `WHERE` and `LIMIT` to control filtering and result count. Since this interface only returns rowid and distance, if you need to access additional columns from the original table, you must use a SELF JOIN.
 
 This makes them ideal for combining vector search with additional query conditions or progressive result consumption in streaming applications.
 
@@ -304,6 +310,20 @@ SELECT rowid, distance
 FROM vector_quantize_scan_stream('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'))
 WHERE score > 0.8
 LIMIT 10;
+```
+
+**Accessing Additional Columns:**
+
+```sql
+-- Perform a filtered full scan with additional columns
+SELECT
+    v.rowid AS sentence_id,
+    row_number() OVER (ORDER BY v.distance) AS rank_number,
+    v.distance
+FROM vector_full_scan_stream('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]')) AS v
+    JOIN sentences ON sentences.rowid = v.rowid
+WHERE sentences.chunk_id = 297
+LIMIT 3;
 ```
 
 **Usage Notes:**
