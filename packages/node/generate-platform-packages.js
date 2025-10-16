@@ -10,7 +10,7 @@
  *   node generate-platform-packages.js <version> <artifacts-dir> <output-dir>
  *
  * Example:
- *   node generate-platform-packages.js 0.9.40 ./artifacts ./platform-packages
+ *   node generate-platform-packages.js 0.9.41 ./artifacts ./platform-packages
  */
 
 const fs = require('fs');
@@ -27,12 +27,12 @@ const PLATFORMS = [
     artifactFolder: 'vector-macos-arm64',
   },
   {
-    name: 'darwin-x64',
+    name: 'darwin-x86_64',
     os: ['darwin'],
-    cpu: ['x64'],
-    description: 'SQLite Vector extension for macOS x64 (Intel)',
+    cpu: ['x64', 'ia32'],
+    description: 'SQLite Vector extension for macOS x86_64 (Intel)',
     binaryName: 'vector.dylib',
-    artifactFolder: 'vector-macos-x64',
+    artifactFolder: 'vector-macos-x86_64',
   },
   {
     name: 'linux-arm64',
@@ -51,28 +51,28 @@ const PLATFORMS = [
     artifactFolder: 'vector-linux-musl-arm64',
   },
   {
-    name: 'linux-x64',
+    name: 'linux-x86_64',
     os: ['linux'],
-    cpu: ['x64'],
-    description: 'SQLite Vector extension for Linux x64 (glibc)',
+    cpu: ['x64', 'ia32'],
+    description: 'SQLite Vector extension for Linux x86_64 (glibc)',
     binaryName: 'vector.so',
-    artifactFolder: 'vector-linux-x64',
+    artifactFolder: 'vector-linux-x86_64',
   },
   {
-    name: 'linux-x64-musl',
+    name: 'linux-x86_64-musl',
     os: ['linux'],
-    cpu: ['x64'],
-    description: 'SQLite Vector extension for Linux x64 (musl)',
+    cpu: ['x64', 'ia32'],
+    description: 'SQLite Vector extension for Linux x86_64 (musl)',
     binaryName: 'vector.so',
-    artifactFolder: 'vector-linux-musl-x64',
+    artifactFolder: 'vector-linux-musl-x86_64',
   },
   {
-    name: 'win32-x64',
+    name: 'win32-x86_64',
     os: ['win32'],
-    cpu: ['x64'],
-    description: 'SQLite Vector extension for Windows x64',
+    cpu: ['x64', 'ia32'],
+    description: 'SQLite Vector extension for Windows x86_64',
     binaryName: 'vector.dll',
-    artifactFolder: 'vector-windows-x64',
+    artifactFolder: 'vector-windows-x86_64',
   },
 ];
 
@@ -165,7 +165,7 @@ function main() {
 
   if (args.length < 3) {
     console.error('Usage: node generate-platform-packages.js <version> <artifacts-dir> <output-dir>');
-    console.error('Example: node generate-platform-packages.js 0.9.40 ./artifacts ./platform-packages');
+    console.error('Example: node generate-platform-packages.js 0.9.41 ./artifacts ./platform-packages');
     process.exit(1);
   }
 
@@ -181,7 +181,7 @@ function main() {
   // Validate version format
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
     console.error(`Error: Invalid version format: ${version}`);
-    console.error('Version must be in semver format (e.g., 0.9.40)');
+    console.error('Version must be in semver format (e.g., 0.9.41)');
     process.exit(1);
   }
 

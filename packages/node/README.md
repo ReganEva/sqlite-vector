@@ -29,12 +29,12 @@ The package automatically downloads the correct native extension for your platfo
 | Platform | Architecture | Package |
 |----------|-------------|---------|
 | macOS | ARM64 (Apple Silicon) | `@sqliteai/sqlite-vector-darwin-arm64` |
-| macOS | x64 (Intel) | `@sqliteai/sqlite-vector-darwin-x64` |
+| macOS | x86_64 (Intel) | `@sqliteai/sqlite-vector-darwin-x86_64` |
 | Linux | ARM64 (glibc) | `@sqliteai/sqlite-vector-linux-arm64` |
 | Linux | ARM64 (musl/Alpine) | `@sqliteai/sqlite-vector-linux-arm64-musl` |
-| Linux | x64 (glibc) | `@sqliteai/sqlite-vector-linux-x64` |
-| Linux | x64 (musl/Alpine) | `@sqliteai/sqlite-vector-linux-x64-musl` |
-| Windows | x64 | `@sqliteai/sqlite-vector-win32-x64` |
+| Linux | x86_64 (glibc) | `@sqliteai/sqlite-vector-linux-x86_64` |
+| Linux | x86_64 (musl/Alpine) | `@sqliteai/sqlite-vector-linux-x86_64-musl` |
+| Windows | x86_64 | `@sqliteai/sqlite-vector-win32-x86_64` |
 
 ## Usage
 
@@ -173,12 +173,12 @@ Returns the current platform identifier.
 
 **Returns:** `Platform` - One of:
 - `'darwin-arm64'` - macOS ARM64
-- `'darwin-x64'` - macOS x64
+- `'darwin-x86_64'` - macOS x86_64
 - `'linux-arm64'` - Linux ARM64 (glibc)
 - `'linux-arm64-musl'` - Linux ARM64 (musl)
-- `'linux-x64'` - Linux x64 (glibc)
-- `'linux-x64-musl'` - Linux x64 (musl)
-- `'win32-x64'` - Windows x64
+- `'linux-x86_64'` - Linux x86_64 (glibc)
+- `'linux-x86_64-musl'` - Linux x86_64 (musl)
+- `'win32-x86_64'` - Windows x86_64
 
 **Throws:** `Error` - If the platform is unsupported
 

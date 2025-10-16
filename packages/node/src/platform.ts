@@ -7,12 +7,12 @@ import { execSync } from 'node:child_process';
  */
 export type Platform =
   | 'darwin-arm64'
-  | 'darwin-x64'
+  | 'darwin-x86_64'
   | 'linux-arm64'
   | 'linux-arm64-musl'
-  | 'linux-x64'
-  | 'linux-x64-musl'
-  | 'win32-x64';
+  | 'linux-x86_64'
+  | 'linux-x86_64-musl'
+  | 'win32-x86_64';
 
 /**
  * Binary extension for each platform
@@ -97,7 +97,7 @@ export function getCurrentPlatform(): Platform {
   // macOS
   if (platformName === 'darwin') {
     if (archName === 'arm64') return 'darwin-arm64';
-    if (archName === 'x64') return 'darwin-x64';
+    if (archName === 'x86_64') return 'darwin-x86_64';
   }
 
   // Linux (with musl detection)
@@ -107,20 +107,20 @@ export function getCurrentPlatform(): Platform {
     if (archName === 'arm64') {
       return `linux-arm64${muslSuffix}` as Platform;
     }
-    if (archName === 'x64') {
-      return `linux-x64${muslSuffix}` as Platform;
+    if (archName === 'x86_64') {
+      return `linux-x86_64${muslSuffix}` as Platform;
     }
   }
 
   // Windows
   if (platformName === 'win32') {
-    if (archName === 'x64') return 'win32-x64';
+    if (archName === 'x86_64') return 'win32-x86_64';
   }
 
   // Unsupported platform
   throw new Error(
     `Unsupported platform: ${platformName}-${archName}. ` +
-    `Supported platforms: darwin-arm64, darwin-x64, linux-arm64, linux-x64, win32-x64 ` +
+    `Supported platforms: darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64, win32-x86_64 ` +
     `(with glibc or musl support for Linux)`
   );
 }

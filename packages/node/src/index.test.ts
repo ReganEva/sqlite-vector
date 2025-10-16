@@ -15,12 +15,12 @@ describe('Platform Detection', () => {
     const platform = getCurrentPlatform();
     const validPlatforms = [
       'darwin-arm64',
-      'darwin-x64',
+      'darwin-x86_64',
       'linux-arm64',
       'linux-arm64-musl',
-      'linux-x64',
-      'linux-x64-musl',
-      'win32-x64',
+      'linux-x86_64',
+      'linux-x86_64-musl',
+      'win32-x86_64',
     ];
 
     assert.ok(
@@ -39,7 +39,7 @@ describe('Platform Detection', () => {
 
     assert.match(
       packageName,
-      /^@sqliteai\/sqlite-vector-(darwin|linux|win32)-(arm64|x64)(-musl)?$/,
+      /^@sqliteai\/sqlite-vector-(darwin|linux|win32)-(arm64|x86_64)(-musl)?$/,
       'Package name should match expected format'
     );
   });
