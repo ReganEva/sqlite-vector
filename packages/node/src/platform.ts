@@ -97,7 +97,7 @@ export function getCurrentPlatform(): Platform {
   // macOS
   if (platformName === 'darwin') {
     if (archName === 'arm64') return 'darwin-arm64';
-    if (archName === 'x86_64') return 'darwin-x86_64';
+    if (archName === 'x64' || archName === 'ia32') return 'darwin-x86_64';
   }
 
   // Linux (with musl detection)
@@ -107,14 +107,14 @@ export function getCurrentPlatform(): Platform {
     if (archName === 'arm64') {
       return `linux-arm64${muslSuffix}` as Platform;
     }
-    if (archName === 'x86_64') {
+    if (archName === 'x64' || archName === 'ia32') {
       return `linux-x86_64${muslSuffix}` as Platform;
     }
   }
 
   // Windows
   if (platformName === 'win32') {
-    if (archName === 'x86_64') return 'win32-x86_64';
+    if (archName === 'x64' || archName === 'ia32') return 'win32-x86_64';
   }
 
   // Unsupported platform

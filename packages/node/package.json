@@ -1,6 +1,6 @@
 {
   "name": "@sqliteai/sqlite-vector",
-  "version": "0.9.43",
+  "version": "0.9.44",
   "description": "SQLite vector search extension for Node.js - Cross-platform vector embeddings and similarity search",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -55,13 +55,13 @@
     "node": ">=16.0.0"
   },
   "optionalDependencies": {
-    "@sqliteai/sqlite-vector-darwin-arm64": "0.9.43",
-    "@sqliteai/sqlite-vector-darwin-x86_64": "0.9.43",
-    "@sqliteai/sqlite-vector-linux-arm64": "0.9.43",
-    "@sqliteai/sqlite-vector-linux-arm64-musl": "0.9.43",
-    "@sqliteai/sqlite-vector-linux-x86_64": "0.9.43",
-    "@sqliteai/sqlite-vector-linux-x86_64-musl": "0.9.43",
-    "@sqliteai/sqlite-vector-win32-x86_64": "0.9.43"
+    "@sqliteai/sqlite-vector-darwin-arm64": "0.9.44",
+    "@sqliteai/sqlite-vector-darwin-x86_64": "0.9.44",
+    "@sqliteai/sqlite-vector-linux-arm64": "0.9.44",
+    "@sqliteai/sqlite-vector-linux-arm64-musl": "0.9.44",
+    "@sqliteai/sqlite-vector-linux-x86_64": "0.9.44",
+    "@sqliteai/sqlite-vector-linux-x86_64-musl": "0.9.44",
+    "@sqliteai/sqlite-vector-win32-x86_64": "0.9.44"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
