@@ -304,6 +304,10 @@ jobs:
           git checkout ${{ github.sha }}
           cd ../..
           git add modules/sqlite-vector
+          PKG=sqlite-wasm/package.json
+          TMP=sqlite-wasm/package.tmp.json
+          jq --arg version "$(cat modules/sqlite/VERSION)-sync.$(cd modules/sqlite-sync && make version)-vector.$(cd modules/sqlite-vector && make version)" '.version = $version' "$PKG" > "$TMP" && mv "$TMP" "$PKG"
+          git add "$PKG"
           git commit -m "Bump sqlite-vector version to ${{ steps.tag.outputs.version }}"
           git push origin main
 
