@@ -335,6 +335,28 @@ jobs:
         run: |
           cd packages/node
 
+          # Update version in package.json and package-lock.json
+          echo "Updating versions to ${{ steps.tag.outputs.version }}..."
+
+          # Update package.json
+          jq --arg version "${{ steps.tag.outputs.version }}" \
+            '.version = $version | .optionalDependencies = (.optionalDependencies | with_entries(.value = $version))' \
+            package.json > package.tmp.json && mv package.tmp.json package.json
+
+          # Update package-lock.json
+          jq --arg version "${{ steps.tag.outputs.version }}" \
+            '.version = $version |
+             .packages[""].version = $version |
+             .packages[""].optionalDependencies = (.packages[""].optionalDependencies | with_entries(.value = $version)) |
+             if .packages then .packages |= with_entries(
+               if (.key | startswith("node_modules/@sqliteai/sqlite-vector-")) then
+                 .value.version = $version
+               else . end
+             ) else . end' \
+            package-lock.json > package-lock.tmp.json && mv package-lock.tmp.json package-lock.json
+
+          echo "✓ Updated package.json and package-lock.json to version ${{ steps.tag.outputs.version }}"
+
           # Generate platform packages
           echo "Generating platform packages..."
           node generate-platform-packages.js "${{ steps.tag.outputs.version }}" "../../artifacts" "./platform-packages"
