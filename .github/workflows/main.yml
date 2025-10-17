@@ -5,7 +5,7 @@ on:
 
 permissions:
   contents: write
-  # id-token: write  # TODO: Enable after first release for npm provenance with OIDC
+  id-token: write
 
 jobs:
   build:
@@ -328,10 +328,11 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: update npm # npm 11.5.1 is required for OIDC auth https://docs.npmjs.com/trusted-publishers
+        run: npm install -g npm@11.5.1
+
       - name: build and publish npm packages
         if: steps.tag.outputs.version != ''
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd packages/node
 
@@ -377,8 +378,7 @@ jobs:
             platform_name=$(basename "$platform_dir")
             echo "  Publishing @sqliteai/sqlite-vector-${platform_name}..."
             cd "$platform_dir"
-            npm publish --access public
-            # TODO: Add --provenance flag after switching to OIDC (requires package to exist first)
+            npm publish --provenance --access public
             cd ..
             echo "  ✓ Published @sqliteai/sqlite-vector-${platform_name}"
           done
@@ -386,8 +386,7 @@ jobs:
 
           # Publish main package
           echo "Publishing main package to npm..."
-          npm publish --access public
-          # TODO: Add --provenance flag after switching to OIDC (requires package to exist first)
+          npm publish --provenance --access public
           echo "✓ Published @sqliteai/sqlite-vector@${{ steps.tag.outputs.version }}"
 
           echo ""
