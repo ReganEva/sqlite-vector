@@ -5,16 +5,12 @@ src/
 tsconfig.json
 tsup.config.ts
 
-# Documentation (not needed in published package)
-IMPLEMENTATION.md
-WORKFLOW_STEPS.md
-README.md
-
 # Scripts (only for repo/CI)
 generate-platform-packages.js
 
 # Development files
 node_modules/
+package-lock.json
 coverage/
 *.log
 
