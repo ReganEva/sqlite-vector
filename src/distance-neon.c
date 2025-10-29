@@ -18,6 +18,17 @@
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
 extern char *distance_backend_name;
 
+// Helper function for 32-bit ARM: vmaxv_u16 is not available in ARMv7 NEON
+#if __SIZEOF_POINTER__ == 4
+static inline uint16_t vmaxv_u16_compat(uint16x4_t v) {
+    // Use pairwise max to reduce vector
+    uint16x4_t m = vpmax_u16(v, v);  // [max(v0,v1), max(v2,v3), max(v0,v1), max(v2,v3)]
+    m = vpmax_u16(m, m);              // [max(all), max(all), max(all), max(all)]
+    return vget_lane_u16(m, 0);
+}
+#define vmaxv_u16 vmaxv_u16_compat
+#endif
+
 // MARK: FLOAT32 -
 
 float float32_distance_l2_impl_neon (const void *v1, const void *v2, int n, bool use_sqrt) {
@@ -158,6 +169,31 @@ float bfloat16_distance_l2_impl_neon (const void *v1, const void *v2, int n, boo
     const uint16_t *a = (const uint16_t *)v1;
     const uint16_t *b = (const uint16_t *)v2;
 
+#if __SIZEOF_POINTER__ == 4
+    // 32-bit ARM: use scalar double accumulation (no float64x2_t in NEON)
+    double sum = 0.0;
+    int i = 0;
+
+    for (; i <= n - 4; i += 4) {
+        uint16x4_t av16 = vld1_u16(a + i);
+        uint16x4_t bv16 = vld1_u16(b + i);
+
+        float32x4_t va = bf16x4_to_f32x4_u16(av16);
+        float32x4_t vb = bf16x4_to_f32x4_u16(bv16);
+        float32x4_t d  = vsubq_f32(va, vb);
+        // mask-out NaNs: m = (d==d)
+        uint32x4_t m   = vceqq_f32(d, d);
+        d = vbslq_f32(m, d, vdupq_n_f32(0.0f));
+
+        // Store and accumulate in scalar double
+        float tmp[4];
+        vst1q_f32(tmp, d);
+        for (int j = 0; j < 4; j++) {
+            double dj = (double)tmp[j];
+            sum = fma(dj, dj, sum);
+        }
+    }
+#else
     // Accumulate in f64 to avoid overflow from huge bf16 values.
     float64x2_t acc0 = vdupq_n_f64(0.0), acc1 = vdupq_n_f64(0.0);
     int i = 0;
@@ -205,6 +241,7 @@ float bfloat16_distance_l2_impl_neon (const void *v1, const void *v2, int n, boo
     }
     
     double sum = vaddvq_f64(vaddq_f64(acc0, acc1));
+#endif
     
     // scalar tail; treat NaN as 0, Inf as +Inf result
     for (; i < n; ++i) {
@@ -409,8 +446,15 @@ float float16_distance_l2_impl_neon (const void *v1, const void *v2, int n, bool
     const uint16x4_t SIGN_MASK = vdup_n_u16(0x8000u);
     const uint16x4_t ZERO16    = vdup_n_u16(0);
 
+#if __SIZEOF_POINTER__ == 4
+    // 32-bit ARM: use scalar double accumulation
+    double sum = 0.0;
+    int i = 0;
+#else
+    // 64-bit ARM: use float64x2_t NEON intrinsics
     float64x2_t acc0 = vdupq_n_f64(0.0), acc1 = vdupq_n_f64(0.0);
     int i = 0;
+#endif
 
     for (; i <= n - 4; i += 4) {
         uint16x4_t av16 = vld1_u16(a + i);
@@ -443,6 +487,16 @@ float float16_distance_l2_impl_neon (const void *v1, const void *v2, int n, bool
         uint32x4_t m = vceqq_f32(d32, d32);                    /* true where not-NaN */
         d32 = vbslq_f32(m, d32, vdupq_n_f32(0.0f));
 
+#if __SIZEOF_POINTER__ == 4
+        // 32-bit ARM: accumulate in scalar double
+        float tmp[4];
+        vst1q_f32(tmp, d32);
+        for (int j = 0; j < 4; j++) {
+            double dj = (double)tmp[j];
+            sum = fma(dj, dj, sum);
+        }
+#else
+        // 64-bit ARM: use NEON f64 operations
         float64x2_t dlo = vcvt_f64_f32(vget_low_f32(d32));
         float64x2_t dhi = vcvt_f64_f32(vget_high_f32(d32));
 #if defined(__ARM_FEATURE_FMA)
@@ -452,9 +506,12 @@ float float16_distance_l2_impl_neon (const void *v1, const void *v2, int n, bool
         acc0 = vaddq_f64(acc0, vmulq_f64(dlo, dlo));
         acc1 = vaddq_f64(acc1, vmulq_f64(dhi, dhi));
 #endif
+#endif
     }
 
+#if __SIZEOF_POINTER__ != 4
     double sum = vaddvq_f64(vaddq_f64(acc0, acc1));
+#endif
 
     /* tail (scalar; same Inf/NaN policy) */
     for (; i < n; ++i) {
@@ -487,10 +544,17 @@ float float16_distance_cosine_neon (const void *v1, const void *v2, int n) {
     const uint16x4_t FRAC_MASK = vdup_n_u16(0x03FFu);
     const uint16x4_t ZERO16    = vdup_n_u16(0);
 
+#if __SIZEOF_POINTER__ == 4
+    // 32-bit ARM: use scalar double accumulation
+    double dot = 0.0, normx = 0.0, normy = 0.0;
+    int i = 0;
+#else
+    // 64-bit ARM: use float64x2_t NEON intrinsics
     float64x2_t acc_dot_lo = vdupq_n_f64(0.0), acc_dot_hi = vdupq_n_f64(0.0);
     float64x2_t acc_a2_lo  = vdupq_n_f64(0.0), acc_a2_hi  = vdupq_n_f64(0.0);
     float64x2_t acc_b2_lo  = vdupq_n_f64(0.0), acc_b2_hi  = vdupq_n_f64(0.0);
     int i = 0;
+#endif
 
     for (; i <= n - 4; i += 4) {
         uint16x4_t av16 = vld1_u16(a + i);
@@ -512,6 +576,19 @@ float float16_distance_cosine_neon (const void *v1, const void *v2, int n) {
         ax = vbslq_f32(mx, ax, vdupq_n_f32(0.0f));
         by = vbslq_f32(my, by, vdupq_n_f32(0.0f));
 
+#if __SIZEOF_POINTER__ == 4
+        // 32-bit ARM: accumulate in scalar double
+        float ax_tmp[4], by_tmp[4];
+        vst1q_f32(ax_tmp, ax);
+        vst1q_f32(by_tmp, by);
+        for (int j = 0; j < 4; j++) {
+            double x = (double)ax_tmp[j];
+            double y = (double)by_tmp[j];
+            dot += x * y;
+            normx += x * x;
+            normy += y * y;
+        }
+#else
         /* widen to f64 and accumulate */
         float64x2_t ax_lo = vcvt_f64_f32(vget_low_f32(ax)), ax_hi = vcvt_f64_f32(vget_high_f32(ax));
         float64x2_t by_lo = vcvt_f64_f32(vget_low_f32(by)), by_hi = vcvt_f64_f32(vget_high_f32(by));
@@ -531,11 +608,14 @@ float float16_distance_cosine_neon (const void *v1, const void *v2, int n) {
         acc_b2_lo  = vaddq_f64(acc_b2_lo,  vmulq_f64(by_lo, by_lo));
         acc_b2_hi  = vaddq_f64(acc_b2_hi,  vmulq_f64(by_hi, by_hi));
 #endif
+#endif
     }
 
+#if __SIZEOF_POINTER__ != 4
     double dot  = vaddvq_f64(vaddq_f64(acc_dot_lo, acc_dot_hi));
     double normx= vaddvq_f64(vaddq_f64(acc_a2_lo,  acc_a2_hi));
     double normy= vaddvq_f64(vaddq_f64(acc_b2_lo,  acc_b2_hi));
+#endif
 
     /* tail (scalar) */
     for (; i < n; ++i) {
@@ -569,8 +649,15 @@ float float16_distance_dot_neon (const void *v1, const void *v2, int n) {
     const uint16x4_t FRAC_MASK = vdup_n_u16(0x03FFu);
     const uint16x4_t ZERO16    = vdup_n_u16(0);
 
+#if __SIZEOF_POINTER__ == 4
+    // 32-bit ARM: use scalar double accumulation
+    double dot = 0.0;
+    int i = 0;
+#else
+    // 64-bit ARM: use float64x2_t NEON intrinsics
     float64x2_t acc_lo = vdupq_n_f64(0.0), acc_hi = vdupq_n_f64(0.0);
     int i = 0;
+#endif
 
     for (; i <= n - 4; i += 4) {
         uint16x4_t av16 = vld1_u16(a + i);
@@ -588,7 +675,11 @@ float float16_distance_dot_neon (const void *v1, const void *v2, int n) {
                 if (isnan(x) || isnan(y)) continue;
                 double p = (double)x * (double)y;
                 if (isinf(p)) return (p>0)? -INFINITY : INFINITY;
+#if __SIZEOF_POINTER__ == 4
+                dot += p;
+#else
                 acc_lo = vsetq_lane_f64(vgetq_lane_f64(acc_lo,0)+p, acc_lo, 0); /* cheap add */
+#endif
             }
             continue;
         }
@@ -603,13 +694,26 @@ float float16_distance_dot_neon (const void *v1, const void *v2, int n) {
         by = vbslq_f32(my, by, vdupq_n_f32(0.0f));
 
         float32x4_t prod = vmulq_f32(ax, by);
+
+#if __SIZEOF_POINTER__ == 4
+        // 32-bit ARM: accumulate in scalar double
+        float prod_tmp[4];
+        vst1q_f32(prod_tmp, prod);
+        for (int j = 0; j < 4; j++) {
+            dot += (double)prod_tmp[j];
+        }
+#else
+        // 64-bit ARM: use NEON f64 operations
         float64x2_t lo = vcvt_f64_f32(vget_low_f32(prod));
         float64x2_t hi = vcvt_f64_f32(vget_high_f32(prod));
         acc_lo = vaddq_f64(acc_lo, lo);
         acc_hi = vaddq_f64(acc_hi, hi);
+#endif
     }
 
+#if __SIZEOF_POINTER__ != 4
     double dot = vaddvq_f64(vaddq_f64(acc_lo, acc_hi));
+#endif
 
     for (; i < n; ++i) {
         float x = float16_to_float32(a[i]);
@@ -635,8 +739,15 @@ float float16_distance_l1_neon (const void *v1, const void *v2, int n) {
     const uint16x4_t SIGN_MASK = vdup_n_u16(0x8000u);
     const uint16x4_t ZERO16    = vdup_n_u16(0);
 
+#if __SIZEOF_POINTER__ == 4
+    // 32-bit ARM: use scalar double accumulation
+    double sum = 0.0;
+    int i = 0;
+#else
+    // 64-bit ARM: use float64x2_t NEON intrinsics
     float64x2_t acc = vdupq_n_f64(0.0);
     int i = 0;
+#endif
 
     for (; i <= n - 4; i += 4) {
         uint16x4_t av16 = vld1_u16(a + i);
@@ -665,13 +776,25 @@ float float16_distance_l1_neon (const void *v1, const void *v2, int n) {
         uint32x4_t m   = vceqq_f32(d, d);                   /* mask NaNs -> 0 */
         d = vbslq_f32(m, d, vdupq_n_f32(0.0f));
 
+#if __SIZEOF_POINTER__ == 4
+        // 32-bit ARM: accumulate in scalar double
+        float tmp[4];
+        vst1q_f32(tmp, d);
+        for (int j = 0; j < 4; j++) {
+            sum += (double)tmp[j];
+        }
+#else
+        // 64-bit ARM: use NEON f64 operations
         float64x2_t lo = vcvt_f64_f32(vget_low_f32(d));
         float64x2_t hi = vcvt_f64_f32(vget_high_f32(d));
         acc = vaddq_f64(acc, lo);
         acc = vaddq_f64(acc, hi);
+#endif
     }
 
+#if __SIZEOF_POINTER__ != 4
     double sum = vaddvq_f64(acc);
+#endif
 
     for (; i < n; ++i) {
         uint16_t ai=a[i], bi=b[i];

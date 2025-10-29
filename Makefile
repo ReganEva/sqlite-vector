@@ -59,7 +59,7 @@ else ifeq ($(PLATFORM),macos)
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
-		$(error "Android ARCH must be set to ARCH=x86_64 or ARCH=arm64-v8a")
+		$(error "Android ARCH must be set to ARCH=x86_64, ARCH=arm64-v8a, or ARCH=armeabi-v7a")
 	endif
 	ifndef ANDROID_NDK # Set ANDROID_NDK path to find android build tools; e.g. on MacOS: export ANDROID_NDK=/Users/username/Library/Android/sdk/ndk/25.2.9519653
 		$(error "Android NDK must be set")
@@ -67,8 +67,14 @@ else ifeq ($(PLATFORM),android)
 	BIN = $(ANDROID_NDK)/toolchains/llvm/prebuilt/$(HOST)-x86_64/bin
 	ifneq (,$(filter $(ARCH),arm64 arm64-v8a))
 		override ARCH := aarch64
+		ANDROID_ABI := android26
+	else ifeq ($(ARCH),armeabi-v7a)
+		override ARCH := armv7a
+		ANDROID_ABI := androideabi26
+	else
+		ANDROID_ABI := android26
 	endif
-	CC = $(BIN)/$(ARCH)-linux-android26-clang
+	CC = $(BIN)/$(ARCH)-linux-$(ANDROID_ABI)-clang
 	TARGET := $(DIST_DIR)/vector.so
 	LDFLAGS += -lm -shared
 	STRIP = $(BIN)/llvm-strip --strip-unneeded $@
@@ -184,11 +190,14 @@ $(DIST_DIR)/%.xcframework: $(LIB_NAMES)
 
 xcframework: $(DIST_DIR)/vector.xcframework
 
-AAR_ARM = packages/android/src/main/jniLibs/arm64-v8a/
+AAR_ARM64 = packages/android/src/main/jniLibs/arm64-v8a/
+AAR_ARM = packages/android/src/main/jniLibs/armeabi-v7a/
 AAR_X86 = packages/android/src/main/jniLibs/x86_64/
 aar:
-	mkdir -p $(AAR_ARM) $(AAR_X86)
+	mkdir -p $(AAR_ARM64) $(AAR_ARM) $(AAR_X86)
 	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=arm64-v8a
+	mv $(DIST_DIR)/vector.so $(AAR_ARM64)
+	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=armeabi-v7a
 	mv $(DIST_DIR)/vector.so $(AAR_ARM)
 	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=x86_64
 	mv $(DIST_DIR)/vector.so $(AAR_X86)
@@ -208,7 +217,7 @@ help:
 	@echo "  linux (default on Linux)"
 	@echo "  macos (default on macOS)"
 	@echo "  windows (default on Windows)"
-	@echo "  android (needs ARCH to be set to x86_64 or arm64-v8a and ANDROID_NDK to be set)"
+	@echo "  android (needs ARCH to be set to x86_64, arm64-v8a, or armeabi-v7a and ANDROID_NDK to be set)"
 	@echo "  ios (only on macOS)"
 	@echo "  ios-sim (only on macOS)"
 	@echo ""
