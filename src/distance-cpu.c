@@ -856,11 +856,11 @@ void init_distance_functions (bool force_cpu) {
     if (force_cpu) return;
     
     #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    if (cpu_supports_avx2()) {
-        init_distance_functions_avx2();
-    }
-    else if (cpu_supports_avx512()) {
+    if (cpu_supports_avx512()) {
         init_distance_functions_avx512();
+    }
+    else if (cpu_supports_avx2()) {
+        init_distance_functions_avx2();
     }
     else if (cpu_supports_sse2()) {
         init_distance_functions_sse2();
