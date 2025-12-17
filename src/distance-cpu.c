@@ -16,6 +16,7 @@
 #include "distance-neon.h"
 #include "distance-sse2.h"
 #include "distance-avx2.h"
+#include "distance-avx512.h"
 
 char *distance_backend_name = "CPU";
 distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX] = {0};
@@ -707,6 +708,25 @@ float int8_distance_l1_cpu (const void *v1, const void *v2, int n) {
         #endif
     }
 
+    void run_cpuid(int leaf, int subleaf, int result[4]) {
+        #if defined(_MSC_VER)
+                __cpuidex(result, leaf, subleaf);
+        #else
+                __cpuid_count(leaf, subleaf, result[0], result[1], result[2], result[3]);
+        #endif
+    }
+
+    uint64_t run_xgetbv(uint32_t xcr) {
+        #if defined(_MSC_VER)
+        return _xgetbv(xcr);
+        #else
+        uint32_t eax, edx;
+        // xgetbv instruction: reads XCR specified by ecx into edx:eax
+        __asm__ volatile("xgetbv" : "=a"(eax), "=d"(edx) : "c"(xcr));
+        return ((uint64_t)edx << 32) | eax;
+        #endif
+    }
+
     bool cpu_supports_avx2 (void) {
         #if FORCE_AVX2
         return true;
@@ -716,6 +736,43 @@ float int8_distance_l1_cpu (const void *v1, const void *v2, int n) {
         if (eax < 7) return false;
         x86_cpuid(7, 0, &eax, &ebx, &ecx, &edx);
         return (ebx & (1 << 5)) != 0;  // AVX2
+        #endif
+    }
+
+    bool cpu_supports_avx512(void) {
+        #if FORCE_AVX512
+                return true;
+        #else
+            int cpu_info[4];
+
+            // 1. Check maximum CPUID leaf
+            run_cpuid(0, 0, cpu_info);
+            if (cpu_info[0] < 7) return false; // CPU too old
+
+            // 2. Check for OSXSAVE (Leaf 1, ECX bit 27)
+            // This implies the processor supports XSAVE/XRSTOR
+            run_cpuid(1, 0, cpu_info);
+            if (!(cpu_info[2] & (1 << 27))) return false;
+
+            // 3. Check XCR0 for OS support of ZMM registers
+            // We need bits 5 (opmask), 6 (ZMM_Hi256), and 7 (Hi16_ZMM) to be 1.
+            // Also usually need bit 1 (SSE) and 2 (AVX)
+            uint64_t xcr0 = run_xgetbv(0);
+            uint64_t avx512_state = (1 << 5) | (1 << 6) | (1 << 7);
+            if ((xcr0 & avx512_state) != avx512_state) return false;
+
+            // 4. Check hardware feature bits (Leaf 7, Subleaf 0)
+            run_cpuid(7, 0, cpu_info);
+
+            // EBX Bit 16: AVX512F (Foundation)
+            bool has_avx512f = (cpu_info[1] & (1 << 16));
+
+            // Optional: Check for BW (Byte/Word) and VL (Vector Length)
+            // Many algorithms (like your integer distance code) need these.
+            bool has_avx512bw = (cpu_info[1] & (1 << 30));
+            bool has_avx512vl = (cpu_info[1] & (1 << 31));
+
+            return has_avx512f && has_avx512bw && has_avx512vl;
         #endif
     }
 
@@ -799,9 +856,13 @@ void init_distance_functions (bool force_cpu) {
     if (force_cpu) return;
     
     #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    if (cpu_supports_avx2()) {
+    if (cpu_supports_avx512()) {
+        init_distance_functions_avx512();
+    }
+    else if (cpu_supports_avx2()) {
         init_distance_functions_avx2();
-    } else if (cpu_supports_sse2()) {
+    }
+    else if (cpu_supports_sse2()) {
         init_distance_functions_sse2();
     }
     #elif defined(__ARM_NEON) || defined(__aarch64__)
