@@ -335,23 +335,23 @@ static char *sqlite_get_int_prikey_column (sqlite3 *db, const char *table_name) 
     char sql[STATIC_SQL_SIZE];
     sqlite3_snprintf(sizeof(sql), sql, "SELECT COUNT(*), type, name FROM pragma_table_info('%q') WHERE pk > 0;", table_name);
     char *prikey = NULL;
-    
+
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, table_name, -1, SQLITE_STATIC);
-        
+
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             int count = sqlite3_column_int(stmt, 0);
             if (count == 1) {
                 const char *decl_type = (const char *)sqlite3_column_text(stmt, 1);
                 // see https://www.sqlite.org/datatype3.html (Determination Of Column Affinity)
-                if (strcasestr(decl_type, "INT")) {
+                if (decl_type && strcasestr(decl_type, "INT")) {
                     prikey = sqlite_strdup((const char *)sqlite3_column_text(stmt, 2));
                 }
             }
         }
     }
-    
+
     sqlite3_finalize(stmt);
     return prikey;
 }
@@ -362,19 +362,19 @@ static bool sqlite_sanity_check (sqlite3_context *context, const char *table_nam
     
     // table_name must exists
     if (sqlite_table_exists(db, table_name) == false) {
-        context_result_error(context, SQLITE_ERROR, "Table '%s' does not exist.", table_name);
+        context_result_error(context, SQLITE_ERROR, "Table '%s' does not exist", table_name);
         return false;
     }
     
     // column_name must exists
     if (sqlite_column_exists(db, table_name, column_name) == false) {
-        context_result_error(context, SQLITE_ERROR, "Column '%s' does not exist in table '%s'.", column_name, table_name);
+        context_result_error(context, SQLITE_ERROR, "Column '%s' does not exist in table '%s'", column_name, table_name);
         return false;
     }
     
     // column_name must be of type BLOB
     if (sqlite_column_is_blob(db, table_name, column_name) == false) {
-        context_result_error(context, SQLITE_ERROR, "Column '%s' in table '%s' must be of type BLOB.", column_name, table_name);
+        context_result_error(context, SQLITE_ERROR, "Column '%s' in table '%s' must be of type BLOB", column_name, table_name);
         return false;
     }
     
@@ -869,14 +869,14 @@ static void vector_print (void *buf, vector_type type, int n) {
 
 static bool sanity_check_args (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types) {
     if (argc != ntypes) {
-        context_result_error(context, SQLITE_ERROR, "Function '%s' expects %d arguments, but %d were provided.", func_name, ntypes, argc);
+        context_result_error(context, SQLITE_ERROR, "Function '%s' expects %d arguments, but %d were provided", func_name, ntypes, argc);
         return false;
     }
     
     for (int i=0; i<argc; ++i) {
         int actual_type = sqlite3_value_type(argv[i]);
         if (actual_type != types[i]) {
-            context_result_error(context, SQLITE_ERROR, "Function '%s': argument %d must be of type %s (got %s).", func_name, (i+1), sqlite_type_name(types[i]), sqlite_type_name(actual_type));
+            context_result_error(context, SQLITE_ERROR, "Function '%s': argument %d must be of type %s (got %s)", func_name, (i+1), sqlite_type_name(types[i]), sqlite_type_name(actual_type));
             return false;
         }
     }
@@ -958,14 +958,14 @@ bool vector_keyvalue_callback (sqlite3_context *context, void *xdata, const char
     
     if (strncasecmp(key, OPTION_KEY_TYPE, key_len) == 0) {
         vector_type type = vector_name_to_type(buffer);
-        if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector type: '%s' is not a recognized type.", buffer);
+        if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector type: '%s' is not a recognized type", buffer);
         options->v_type = type;
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_DIMENSION, key_len) == 0) {
         int dimension = (int)strtol(buffer, NULL, 0);
-        if (dimension <= 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector dimension: expected a positive integer, got '%s'.", buffer);
+        if (dimension <= 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector dimension: expected a positive integer, got '%s'", buffer);
         options->v_dim = dimension;
         return true;
     }
@@ -978,20 +978,20 @@ bool vector_keyvalue_callback (sqlite3_context *context, void *xdata, const char
     
     if (strncasecmp(key, OPTION_KEY_MAXMEMORY, key_len) == 0) {
         uint64_t max_memory = human_to_number(buffer);
-        if (max_memory >= 0) options->max_memory = (int)max_memory;
+        if (max_memory > 0) options->max_memory = max_memory;
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_QUANTTYPE, key_len) == 0) {
         vector_qtype type = quant_name_to_type(buffer);
-        if (type == -1) return context_result_error(context, SQLITE_ERROR, "Invalid quantization type: '%s' is not a recognized or supported quantization type.", buffer);
+        if (type == -1) return context_result_error(context, SQLITE_ERROR, "Invalid quantization type: '%s' is not a recognized or supported quantization type", buffer);
         options->q_type = type;
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_DISTANCE, key_len) == 0) {
         vector_distance type = distance_name_to_type(buffer);
-        if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid distance name: '%s' is not a recognized or supported distance.", buffer);
+        if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid distance name: '%s' is not a recognized or supported distance", buffer);
         options->v_distance = type;
         return true;
     }
@@ -1072,14 +1072,14 @@ table_context *vector_context_lookup (vector_context *ctx, const char *table_nam
 void vector_context_add (sqlite3_context *context, vector_context *ctx, const char *table_name, const char *column_name, vector_options *options) {
     // check if there is a free slot
     if (ctx->table_count >= MAX_TABLES) {
-        context_result_error(context, SQLITE_ERROR, "Cannot add table: maximum number of allowed tables reached (%d).", MAX_TABLES);
+        context_result_error(context, SQLITE_ERROR, "Cannot add table: maximum number of allowed tables reached (%d)", MAX_TABLES);
         return;
     }
     
     char *t_name = sqlite_strdup(table_name);
     char *c_name = sqlite_strdup(column_name);
     if (!t_name || !c_name) {
-        context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate table or column name.");
+        context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate table or column name");
         if (t_name) sqlite3_free(t_name);
         if (c_name) sqlite3_free(c_name);
         return;
@@ -1089,10 +1089,12 @@ void vector_context_add (sqlite3_context *context, vector_context *ctx, const ch
     sqlite3 *db = sqlite3_context_db_handle(context);
     bool is_without_rowid = sqlite_table_is_without_rowid(db, table_name);
     prikey = (is_without_rowid == false) ? sqlite_strdup("rowid") : sqlite_get_int_prikey_column(db, table_name);
-    
+
     // sanity check primary key
     if (!prikey) {
-        (is_without_rowid) ? context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate rowid column name.") : context_result_error(context, SQLITE_ERROR, "WITHOUT ROWID table '%s' must have exactly one PRIMARY KEY column of type INTEGER.", table_name);
+        (is_without_rowid) ? context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate rowid column name") : context_result_error(context, SQLITE_ERROR, "WITHOUT ROWID table '%s' must have exactly one PRIMARY KEY column of type INTEGER", table_name);
+        sqlite3_free(t_name);
+        sqlite3_free(c_name);
         return;
     }
     
@@ -1164,12 +1166,11 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     const char *pk_name = t_ctx->pk_name;
     int dim = t_ctx->options.v_dim;
     vector_type type = t_ctx->options.v_type;
-    float *tempv = NULL;
     
     // compute size of a single quant, format is: rowid + quantize dimensions
     size_t q_size = sizeof(int64_t) + (size_t)dim * sizeof(uint8_t);
     if (q_size == 0) {
-        sqlite3_result_error(context, "Vector dimension is zero, which is not possible.", -1);
+        sqlite3_result_error(context, "Vector dimension is zero, which is not possible", -1);
         return SQLITE_MISUSE;
     }
     
@@ -1195,10 +1196,6 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     uint8_t *data = sqlite3_malloc64(out_bytes);
     uint8_t *original = data;
     if (!data) goto vector_rebuild_quantization_cleanup;
-    
-    sqlite3_uint64 temp_bytes = (sqlite3_uint64)dim * (sqlite3_uint64)sizeof(float);
-    tempv = (float *)sqlite3_malloc64(temp_bytes);
-    if (!tempv) goto vector_rebuild_quantization_cleanup;
         
     // SELECT rowid, embedding FROM table
     generate_select_from_table(table_name, column_name, pk_name, sql);
@@ -1228,7 +1225,7 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
         int blob_size = sqlite3_column_bytes(vm, 1);
         size_t need_bytes = (size_t)dim * (size_t)vector_type_to_size(type);
         if (blob_size < need_bytes) {
-            context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld.", (long long)sqlite3_column_int64(vm, 0));
+            context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld", (long long)sqlite3_column_int64(vm, 0));
             rc = SQLITE_ERROR;
             goto vector_rebuild_quantization_cleanup;
         }
@@ -1252,7 +1249,7 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
                     val = (float)(((int8_t *)blob)[i]);
                     break;
                 default:
-                    context_result_error(context, SQLITE_ERROR, "Unsupported vector type.");
+                    context_result_error(context, SQLITE_ERROR, "Unsupported vector type");
                     rc = SQLITE_ERROR;
                     goto vector_rebuild_quantization_cleanup;
             }
@@ -1272,7 +1269,13 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     // STEP 2
     // compute scale and offset and set table them to table context standard min-max linear quantization
     float abs_max = fmaxf(fabsf(min_val), fabsf(max_val)); // only used in VECTOR_QUANT_S8BIT
-    float scale = (qtype == VECTOR_QUANT_U8BIT) ? (255.0f / (max_val - min_val)) : (127.0f / abs_max);
+    float range = max_val - min_val;
+    float scale;
+    if (qtype == VECTOR_QUANT_U8BIT) {
+        scale = (range > 0.0f) ? (255.0f / range) : 1.0f;
+    } else {
+        scale = (abs_max > 0.0f) ? (127.0f / abs_max) : 1.0f;
+    }
     // in the VECTOR_QUANT_S8BIT version I am assuming a symmetric quantization, for asymmetric quantization min_val should be used
     float offset = (qtype == VECTOR_QUANT_U8BIT) ? min_val : 0.0f;
     
@@ -1338,7 +1341,6 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
 vector_rebuild_quantization_cleanup:
     if (rc != SQLITE_OK) printf("Error in vector_rebuild_quantization: %s\n", sqlite3_errmsg(db));
     if (original) sqlite3_free(original);
-    if (tempv) sqlite3_free(tempv);
     if (vm) sqlite3_finalize(vm);
     if (count) *count = tot_processed;
     return rc;
@@ -1354,7 +1356,7 @@ static void vector_quantize_preload (sqlite3_context *context, int argc, sqlite3
     vector_context *v_ctx = (vector_context *)sqlite3_user_data(context);
     table_context *t_ctx = vector_context_lookup(v_ctx, table_name, column_name);
     if (!t_ctx) {
-        context_result_error(context, SQLITE_ERROR, "Vector context not found for table '%s' and column '%s'. Ensure that vector_init() has been called before using vector_quantize_preload().", table_name, column_name);
+        context_result_error(context, SQLITE_ERROR, "Vector context not found for table '%s' and column '%s'. Ensure that vector_init() has been called before using vector_quantize_preload()", table_name, column_name);
         return;
     }
     
@@ -1372,14 +1374,14 @@ static void vector_quantize_preload (sqlite3_context *context, int argc, sqlite3
     sqlite3 *db = sqlite3_context_db_handle(context);
     sqlite3_int64 required = sqlite_read_int64(db, sql);
     if (required == 0) {
-        context_result_error(context, SQLITE_ERROR, "Unable to read data from database. Ensure that vector_quantize() has been called before using vector_quantize_preload().");
+        context_result_error(context, SQLITE_ERROR, "Unable to read data from database. Ensure that vector_quantize() has been called before using vector_quantize_preload()");
         return;
     }
     
     int counter = 0;
     void *buffer = (void *)sqlite3_malloc64(required);
     if (!buffer) {
-        context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to allocate %lld bytes for quant buffer.", (long long)required);
+        context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to allocate %lld bytes for quant buffer", (long long)required);
         return;
     }
     
@@ -1425,7 +1427,7 @@ static void vector_quantize_preload (sqlite3_context *context, int argc, sqlite3
 static int vector_quantize (sqlite3_context *context, const char *table_name, const char *column_name, const char *arg_options, bool *was_preloaded) {
     table_context *t_ctx = vector_context_lookup((vector_context *)sqlite3_user_data(context), table_name, column_name);
     if (!t_ctx) {
-        context_result_error(context, SQLITE_ERROR, "Vector context not found for table '%s' and column '%s'. Ensure that vector_init() has been called before using vector_quantize().", table_name, column_name);
+        context_result_error(context, SQLITE_ERROR, "Vector context not found for table '%s' and column '%s'. Ensure that vector_init() has been called before using vector_quantize()", table_name, column_name);
         return SQLITE_ERROR;
     }
     
@@ -1529,21 +1531,23 @@ static void vector_quantize_memory (sqlite3_context *context, int argc, sqlite3_
 static void vector_quantize_cleanup (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_TEXT, SQLITE_TEXT};
     if (sanity_check_args(context, "vector_quantize_cleanup", argc, argv, 2, types) == false) return;
-    
+
     const char *table_name = (const char *)sqlite3_value_text(argv[0]);
     const char *column_name = (const char *)sqlite3_value_text(argv[1]);
-    
+
     vector_context *v_ctx = (vector_context *)sqlite3_user_data(context);
     table_context *t_ctx = vector_context_lookup(v_ctx, table_name, column_name);
     if (!t_ctx) return; // if no table context exists then do nothing
-    
+
     // release any memory used in quantization
+    sqlite3_mutex_enter(qmutex);
     if (t_ctx->preloaded) {
         sqlite3_free(t_ctx->preloaded);
         t_ctx->preloaded = NULL;
         t_ctx->precounter = 0;
     }
-    
+    sqlite3_mutex_leave(qmutex);
+
     // drop quant table (if any)
     char sql[STATIC_SQL_SIZE];
     sqlite3 *db = sqlite3_context_db_handle(context);
@@ -1561,7 +1565,7 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
     
     // sanity check the JSON start array character
     if (*json != '[') {
-        return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: expected '[' at the beginning of the array.");
+        return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: expected '[' at the beginning of the array");
     }
     json++;
 
@@ -1577,7 +1581,7 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
     size_t alloc = (estimated_count + 1) * item_size;
     blob = sqlite3_malloc((int)alloc);
     if (!blob) {
-        return sqlite_common_set_error(context, vtab, SQLITE_NOMEM, "Out of memory: unable to allocate %lld bytes for BLOB buffer.", (long long)alloc);
+        return sqlite_common_set_error(context, vtab, SQLITE_NOMEM, "Out of memory: unable to allocate %lld bytes for BLOB buffer", (long long)alloc);
     }
     
     // typed pointers
@@ -1604,12 +1608,12 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
         if (p == endptr) {
             // parsing failed
             sqlite3_free(blob);
-            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: expected a number at position %d (found '%c').", (int)(p - json) + 1, *p ? *p : '?');
+            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: expected a number at position %d (found '%c')", (int)(p - json) + 1, *p ? *p : '?');
         }
         
         if (count >= (int)(alloc / item_size)) {
             sqlite3_free(blob);
-            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Too many elements in JSON array.");
+            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Too many elements in JSON array");
         }
         
         // convert to proper type
@@ -1629,7 +1633,7 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
             case VECTOR_TYPE_U8:
                 if (value < 0 || value > 255) {
                     sqlite3_free(blob);
-                    return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Value out of range for uint8_t.");
+                    return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Value out of range for uint8_t");
                 }
                 uint8_blob[count++] = (uint8_t)value;
                 break;
@@ -1637,14 +1641,14 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
             case VECTOR_TYPE_I8:
                 if (value < -128 || value > 127) {
                     sqlite3_free(blob);
-                    return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Value out of range for int8_t.");
+                    return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Value out of range for int8_t");
                 }
                 int8_blob[count++] = (int8_t)value;
                 break;
                 
             default:
                 sqlite3_free(blob);
-                return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Unsupported vector type.");
+                return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Unsupported vector type");
         }
         
         p = endptr;
@@ -1666,14 +1670,14 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
             break;
         } else {
             sqlite3_free(blob);
-            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: unexpected character '%c' at position %d.", *p ? *p : '?', (int)(p - json) + 1);
+            return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: unexpected character '%c' at position %d", *p ? *p : '?', (int)(p - json) + 1);
         }
     }
     
     // sanity check vector dimension
     if ((dimension > 0) && (dimension != count)) {
         sqlite3_free(blob);
-        return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Invalid JSON vector dimension: expected %d but found %d.", dimension, count);
+        return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Invalid JSON vector dimension: expected %d but found %d", dimension, count);
     }
     
     if (size) *size = (int)(count * item_size);
@@ -1691,13 +1695,13 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
     if (value_type == SQLITE_BLOB) {
         // the only check we can perform is that the blob size is an exact multiplier of the vector type
         if (value_size % vector_type_to_size(type) != 0) {
-            context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': size must be a multiple of %d bytes.", vector_type_to_name(type), vector_type_to_size(type));
+            context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': size must be a multiple of %d bytes", vector_type_to_name(type), vector_type_to_size(type));
             return;
         }
         if (dimension > 0) {
             int expected_size = (int)vector_type_to_size(type) * dimension;
             if (value_size != expected_size) {
-                context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': expected dimension should be %d (BLOB is %d bytes instead of %d).", vector_type_to_name(type), dimension, value_size, expected_size);
+                context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': expected dimension should be %d (BLOB is %d bytes instead of %d)", vector_type_to_name(type), dimension, value_size, expected_size);
                 return;
             }
         }
@@ -1710,7 +1714,7 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
         // try to parse JSON array value
         const char *json = (const char *)sqlite3_value_text(value);
         if (!json) {
-            context_result_error(context, SQLITE_ERROR, "Invalid TEXT input.");
+            context_result_error(context, SQLITE_ERROR, "Invalid TEXT input");
             return;
         }
         
@@ -1723,7 +1727,7 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
         return;
     }
     
-    context_result_error(context, SQLITE_ERROR, "Unsupported input type: only BLOB and TEXT values are accepted (received %s).", sqlite_type_name(value_type));
+    context_result_error(context, SQLITE_ERROR, "Unsupported input type: only BLOB and TEXT values are accepted (received %s)", sqlite_type_name(value_type));
 }
 
 static void vector_as_f32 (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1747,6 +1751,7 @@ static void vector_as_i8 (sqlite3_context *context, int argc, sqlite3_value **ar
 }
 
 // MARK: - Modules -
+static int vFullScanCursorNext (sqlite3_vtab_cursor *cur);
 
 static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv, const char *fname, vcursor_run_callback run_callback, vcursor_sort_callback sort_callback, bool quantized) {
     
@@ -1761,7 +1766,7 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
     // sanity check arguments
     int nargs = (is_streaming) ? 3 : 4;
     if (argc != nargs) {
-        return sqlite_vtab_set_error(&vtab->base, "%s expects %d arguments, but %d were provided.", fname, nargs, argc);
+        return sqlite_vtab_set_error(&vtab->base, "%s expects %d arguments, but %d were provided", fname, nargs, argc);
     }
     
     // SQLITE_TEXT, SQLITE_TEXT, SQLITE_TEXT or SQLITE_BLOB, SQLITE_INTEGER
@@ -1771,15 +1776,15 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
             case 0:
             case 1:
                 if (actual_type != SQLITE_TEXT)
-                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type TEXT (got %s).", fname, (i+1), argc, sqlite_type_name(actual_type));
+                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type TEXT (got %s)", fname, (i+1), sqlite_type_name(actual_type));
                 break;
             case 2:
                 if ((actual_type != SQLITE_TEXT) && (actual_type != SQLITE_BLOB))
-                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type TEXT or BLOB (got %s).", fname, (i+1), argc, sqlite_type_name(actual_type));
+                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type TEXT or BLOB (got %s)", fname, (i+1), sqlite_type_name(actual_type));
                 break;
             case 3:
                 if (actual_type != SQLITE_INTEGER)
-                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type INTEGER (got %s).", fname, (i+1), argc, sqlite_type_name(actual_type));
+                    return sqlite_vtab_set_error(&vtab->base, "%s: argument %d must be of type INTEGER (got %s)", fname, (i+1), sqlite_type_name(actual_type));
                 break;
         }
     }
@@ -1789,7 +1794,7 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
     const char *column_name = (const char *)sqlite3_value_text(argv[1]);
     table_context *t_ctx = vector_context_lookup(vtab->ctx, table_name, column_name);
     if (!t_ctx) {
-        return sqlite_vtab_set_error(&vtab->base, "%s: unable to retrieve context.", fname);
+        return sqlite_vtab_set_error(&vtab->base, "%s: unable to retrieve context", fname);
     }
     
     const void *vector = NULL;
@@ -1801,7 +1806,7 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
     } else {
         vector = (const void *)sqlite3_value_blob(argv[2]);
         vsize = sqlite3_value_bytes(argv[2]);
-        if (!vector) return sqlite_vtab_set_error(&vtab->base, "%s: input vector cannot be NULL.", fname);
+        if (!vector) return sqlite_vtab_set_error(&vtab->base, "%s: input vector cannot be NULL", fname);
     }
     VECTOR_PRINT((void*)vector, t_ctx->options.v_type, t_ctx->options.v_dim);
     
@@ -1809,14 +1814,16 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
         char buffer[STATIC_SQL_SIZE];
         char *name = generate_quant_table_name(table_name, column_name, buffer);
         if (!name || !sqlite_table_exists(vtab->db, name)) {
-            sqlite_vtab_set_error(&vtab->base, "Quantization table not found for table '%s' and column '%s'. Ensure that vector_quantize() has been called before using vector_quantize_scan().", table_name, column_name);
+            sqlite_vtab_set_error(&vtab->base, "Quantization table not found for table '%s' and column '%s'. Ensure that vector_quantize() has been called before using vector_quantize_scan()", table_name, column_name);
             return SQLITE_ERROR;
         }
     }
     
     c->table = t_ctx;
     if (is_streaming) {
-        return run_callback(vtab->db, c, vector, vsize);
+        int rc = run_callback(vtab->db, c, vector, vsize);
+        if (rc != SQLITE_OK) return rc;
+        return vFullScanCursorNext((sqlite3_vtab_cursor *)c);  // Position on first row
     }
     
     // non-streaming flow
@@ -2549,17 +2556,17 @@ static void vector_init (sqlite3_context *context, int argc, sqlite3_value **arg
     if (t_ctx) {
         // sanity check
         if (options.v_dim != t_ctx->options.v_dim) {
-            context_result_error(context, SQLITE_ERROR, "Inconsistent vector dimension for '%s.%s': existing=%d, provided=%d.", table_name, column_name, t_ctx->options.v_dim, options.v_dim);
+            context_result_error(context, SQLITE_ERROR, "Inconsistent vector dimension for '%s.%s': existing=%d, provided=%d", table_name, column_name, t_ctx->options.v_dim, options.v_dim);
             return;
         }
         
         if (options.v_type != t_ctx->options.v_type) {
-            context_result_error(context, SQLITE_ERROR, "Inconsistent vector type for '%s.%s': existing=%s, provided=%s.", table_name, column_name, vector_type_to_name(t_ctx->options.v_type), vector_type_to_name(options.v_type));
+            context_result_error(context, SQLITE_ERROR, "Inconsistent vector type for '%s.%s': existing=%s, provided=%s", table_name, column_name, vector_type_to_name(t_ctx->options.v_type), vector_type_to_name(options.v_type));
             return;
         }
         
         if (options.v_normalized != t_ctx->options.v_normalized) {
-            context_result_error(context, SQLITE_ERROR, "Inconsistent normalization flag for '%s.%s': existing=%s, provided=%s.", table_name, column_name, t_ctx->options.v_normalized ? "true" : "false", options.v_normalized ? "true" : "false");
+            context_result_error(context, SQLITE_ERROR, "Inconsistent normalization flag for '%s.%s': existing=%s, provided=%s", table_name, column_name, t_ctx->options.v_normalized ? "true" : "false", options.v_normalized ? "true" : "false");
             return;
         }
         
@@ -2639,22 +2646,27 @@ SQLITE_VECTOR_API int sqlite3_vector_init (sqlite3 *db, char **pzErrMsg, const s
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "vector_as_f32", 1, SQLITE_UTF8, ctx, vector_as_f32, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_f32", 2, SQLITE_UTF8, ctx, vector_as_f32, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "vector_as_f16", 1, SQLITE_UTF8, ctx, vector_as_f16, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_f16", 2, SQLITE_UTF8, ctx, vector_as_f16, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "vector_as_bf16", 1, SQLITE_UTF8, ctx, vector_as_bf16, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_bf16", 2, SQLITE_UTF8, ctx, vector_as_bf16, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "vector_as_i8", 1, SQLITE_UTF8, ctx, vector_as_i8, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_i8", 2, SQLITE_UTF8, ctx, vector_as_i8, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "vector_as_u8", 1, SQLITE_UTF8, ctx, vector_as_u8, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_u8", 2, SQLITE_UTF8, ctx, vector_as_u8, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
@@ -2669,7 +2681,10 @@ SQLITE_VECTOR_API int sqlite3_vector_init (sqlite3 *db, char **pzErrMsg, const s
     
     rc = sqlite3_create_module(db, "vector_quantize_scan_stream", &vQuantScanStreamModule, ctx);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
+    return SQLITE_OK;
+
 cleanup:
+    vector_context_free(ctx);
     return rc;
 }
