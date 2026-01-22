@@ -846,7 +846,7 @@ static void quantize_binary_i8 (const int8_t *input, uint8_t *output, int dim) {
 
 // MARK: - General Utils -
 
-static size_t vector_type_to_size (vector_type type) {
+static int vector_type_to_size (vector_type type) {
     switch (type) {
         case VECTOR_TYPE_F32:  return sizeof(float);        // 4 bytes
         case VECTOR_TYPE_F16:  return sizeof(uint16_t);     // 2 bytes
@@ -855,7 +855,7 @@ static size_t vector_type_to_size (vector_type type) {
         case VECTOR_TYPE_I8:   return sizeof(int8_t);       // 1 byte
         case VECTOR_TYPE_BIT:  return 0;                    // Special: use vector_bytes_for_dim()
     }
-    return SIZE_T_MAX;                                      // error
+    return -1;                                              // error
 }
 
 static vector_type vector_name_to_type (const char *vname) {
@@ -904,6 +904,7 @@ static vector_distance distance_name_to_type (const char *dname) {
     if (strcasecmp(dname, "INNER") == 0) return VECTOR_DISTANCE_DOT;
     if (strcasecmp(dname, "L1") == 0) return VECTOR_DISTANCE_L1;
     if (strcasecmp(dname, "MANHATTAN") == 0) return VECTOR_DISTANCE_L1;
+    if (strcasecmp(dname, "HAMMING") == 0) return VECTOR_DISTANCE_HAMMING;
     return 0;
 }
 
@@ -1302,63 +1303,65 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     if (rc != SQLITE_OK) goto vector_rebuild_quantization_cleanup;
     
     // STEP 1
-    // find global min/max across ALL vectors
+    // find global min/max across ALL vectors (skip for 1BIT quantization which uses fixed threshold)
     #if defined(_WIN32) || defined(__linux__)
     float min_val = FLT_MAX;
     float max_val = -FLT_MAX;
-    #else 
+    #else
     float min_val = MAXFLOAT;
     float max_val = -MAXFLOAT;
     #endif
     bool contains_negative = false;
-    
-    while (1) {
-        rc = sqlite3_step(vm);
-        if (rc == SQLITE_DONE) {rc = SQLITE_OK; break;}
-        else if (rc != SQLITE_ROW) break;
-        if (sqlite3_column_type(vm, 1) == SQLITE_NULL) continue;
-        
-        const void *blob = (float *)sqlite3_column_blob(vm, 1);
-        if (!blob) continue;
-        
-        int blob_size = sqlite3_column_bytes(vm, 1);
-        size_t need_bytes = vector_bytes_for_dim(type, dim);
-        if (blob_size < need_bytes) {
-            context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld", (long long)sqlite3_column_int64(vm, 0));
-            rc = SQLITE_ERROR;
-            goto vector_rebuild_quantization_cleanup;
-        }
-        
-        for (int i = 0; i < dim; ++i) {
-            float val = 0.0f;
-            switch (type) {
-                case VECTOR_TYPE_F32:
-                    val = ((float *)blob)[i];
-                    break;
-                case VECTOR_TYPE_F16:
-                    val = float16_to_float32(((uint16_t *)blob)[i]);
-                    break;
-                case VECTOR_TYPE_BF16:
-                    val = bfloat16_to_float32(((uint16_t *)blob)[i]);
-                    break;
-                case VECTOR_TYPE_U8:
-                    val = (float)(((uint8_t *)blob)[i]);
-                    break;
-                case VECTOR_TYPE_I8:
-                    val = (float)(((int8_t *)blob)[i]);
-                    break;
-                default:
-                    context_result_error(context, SQLITE_ERROR, "Unsupported vector type");
-                    rc = SQLITE_ERROR;
-                    goto vector_rebuild_quantization_cleanup;
+
+    if (qtype != VECTOR_QUANT_1BIT) {
+        while (1) {
+            rc = sqlite3_step(vm);
+            if (rc == SQLITE_DONE) {rc = SQLITE_OK; break;}
+            else if (rc != SQLITE_ROW) break;
+            if (sqlite3_column_type(vm, 1) == SQLITE_NULL) continue;
+
+            const void *blob = (float *)sqlite3_column_blob(vm, 1);
+            if (!blob) continue;
+
+            int blob_size = sqlite3_column_bytes(vm, 1);
+            size_t need_bytes = vector_bytes_for_dim(type, dim);
+            if (blob_size < need_bytes) {
+                context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld", (long long)sqlite3_column_int64(vm, 0));
+                rc = SQLITE_ERROR;
+                goto vector_rebuild_quantization_cleanup;
             }
 
-            if (val < min_val) min_val = val;
-            if (val > max_val) max_val = val;
-            if (val < 0.0) contains_negative = true;
+            for (int i = 0; i < dim; ++i) {
+                float val = 0.0f;
+                switch (type) {
+                    case VECTOR_TYPE_F32:
+                        val = ((float *)blob)[i];
+                        break;
+                    case VECTOR_TYPE_F16:
+                        val = float16_to_float32(((uint16_t *)blob)[i]);
+                        break;
+                    case VECTOR_TYPE_BF16:
+                        val = bfloat16_to_float32(((uint16_t *)blob)[i]);
+                        break;
+                    case VECTOR_TYPE_U8:
+                        val = (float)(((uint8_t *)blob)[i]);
+                        break;
+                    case VECTOR_TYPE_I8:
+                        val = (float)(((int8_t *)blob)[i]);
+                        break;
+                    default:
+                        context_result_error(context, SQLITE_ERROR, "Unsupported vector type for 8-bit quantization");
+                        rc = SQLITE_ERROR;
+                        goto vector_rebuild_quantization_cleanup;
+                }
+
+                if (val < min_val) min_val = val;
+                if (val > max_val) max_val = val;
+                if (val < 0.0) contains_negative = true;
+            }
         }
     }
-    
+
     // set proper format
     if (qtype == VECTOR_QUANT_AUTO) {
         if (contains_negative == true) qtype = VECTOR_QUANT_S8BIT;
@@ -1694,13 +1697,17 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
     }
     
     // allocate blob
+    // For BIT type, each JSON element is a single bit, pack 8 per byte
     size_t item_size = vector_type_to_size(type);
-    size_t alloc = (estimated_count + 1) * item_size;
+    size_t alloc = (type == VECTOR_TYPE_BIT) ? ((estimated_count + 1) + 7) / 8 : (estimated_count + 1) * item_size;
     blob = sqlite3_malloc((int)alloc);
     if (!blob) {
         return sqlite_common_set_error(context, vtab, SQLITE_NOMEM, "Out of memory: unable to allocate %lld bytes for BLOB buffer", (long long)alloc);
     }
-    
+    if (type == VECTOR_TYPE_BIT) {
+        memset(blob, 0, alloc);  // Initialize to zero for bit packing
+    }
+
     // typed pointers
     float      *float_blob    = (float *)blob;
     uint8_t    *uint8_blob    = (uint8_t *)blob;
@@ -1728,17 +1735,19 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
             return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Malformed JSON: expected a number at position %d (found '%c')", (int)(p - json) + 1, *p ? *p : '?');
         }
         
-        if (count >= (int)(alloc / item_size)) {
+        // check bounds
+        int max_count = (type == VECTOR_TYPE_BIT) ? (int)(alloc * 8) : (int)(alloc / item_size);
+        if (count >= max_count) {
             sqlite3_free(blob);
             return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Too many elements in JSON array");
         }
-        
+
         // convert to proper type
         switch (type) {
             case VECTOR_TYPE_F32:
                 float_blob[count++] = (float)value;
                 break;
-                
+
             case VECTOR_TYPE_F16:
                 uint16_blob[count++] = float32_to_float16((float)value);
                 break;
@@ -1746,7 +1755,7 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
             case VECTOR_TYPE_BF16:
                 bfloat16_blob[count++] = float32_to_bfloat16((float)value);
                 break;
-                
+
             case VECTOR_TYPE_U8:
                 if (value < 0 || value > 255) {
                     sqlite3_free(blob);
@@ -1754,7 +1763,7 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
                 }
                 uint8_blob[count++] = (uint8_t)value;
                 break;
-                
+
             case VECTOR_TYPE_I8:
                 if (value < -128 || value > 127) {
                     sqlite3_free(blob);
@@ -1762,7 +1771,18 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
                 }
                 int8_blob[count++] = (int8_t)value;
                 break;
-                
+
+            case VECTOR_TYPE_BIT:
+                if (value != 0 && value != 1) {
+                    sqlite3_free(blob);
+                    return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Value out of range for BIT: expected 0 or 1");
+                }
+                if ((int)value == 1) {
+                    uint8_blob[count / 8] |= (1 << (count % 8));
+                }
+                count++;
+                break;
+
             default:
                 sqlite3_free(blob);
                 return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Unsupported vector type");
@@ -1796,8 +1816,8 @@ static void *vector_from_json (sqlite3_context *context, sqlite3_vtab *vtab, vec
         sqlite3_free(blob);
         return sqlite_common_set_error(context, vtab, SQLITE_ERROR, "Invalid JSON vector dimension: expected %d but found %d", dimension, count);
     }
-    
-    if (size) *size = (int)(count * item_size);
+
+    if (size) *size = (type == VECTOR_TYPE_BIT) ? (int)((count + 7) / 8) : (int)(count * item_size);
     return blob;
 }
 
@@ -1846,8 +1866,10 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
         
         char *blob = vector_from_json(context, NULL, type, json, &value_size, dimension);
         if (!blob) return; // error is set in the context
-        
-        VECTOR_PRINT((void *)blob, type, (dimension == 0) ? (value_size / vector_type_to_size(type)) : dimension);
+
+        int print_dim = dimension;
+        if (print_dim == 0) print_dim = (type == VECTOR_TYPE_BIT) ? value_size * 8 : value_size / vector_type_to_size(type);
+        VECTOR_PRINT((void *)blob, type, print_dim);
         
         sqlite3_result_blob(context, (const void *)blob, value_size, sqlite3_free);
         return;
@@ -1874,6 +1896,10 @@ static void vector_as_u8 (sqlite3_context *context, int argc, sqlite3_value **ar
 
 static void vector_as_i8 (sqlite3_context *context, int argc, sqlite3_value **argv) {
     vector_as_type(context, VECTOR_TYPE_I8, argc, argv);
+}
+
+static void vector_as_bit (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    vector_as_type(context, VECTOR_TYPE_BIT, argc, argv);
 }
 
 // MARK: - Modules -
@@ -2073,18 +2099,21 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
 
     // FULL-SCAN
     if (!c->is_quantized) {
+        // For BIT type, use byte count instead of dimension
+        vector_type vt = c->table->options.v_type;
+        int dist_size = (vt == VECTOR_TYPE_BIT) ? ((dimension + 7) / 8) : dimension;
         while (1) {
             int rc = sqlite3_step(vm);
             if (rc == SQLITE_DONE) { c->stream.is_eof = 1; return SQLITE_OK; }
             else if (rc != SQLITE_ROW) return rc;
-            
+
             // skip NULL values
             if (sqlite3_column_type(vm, 1) == SQLITE_NULL) continue;
 
             const float *v2 = (const float *)sqlite3_column_blob(vm, 1);
             if (v2 == NULL) continue;
 
-            float distance = distance_fn((const void *)v1, (const void *)v2, dimension);
+            float distance = distance_fn((const void *)v1, (const void *)v2, dist_size);
             if (nearly_zero_float32(distance)) distance = 0.0f;
 
             c->stream.distance = distance;
@@ -2245,18 +2274,20 @@ static int vFullScanRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1
     // compute distance function
     vector_distance vd = c->table->options.v_distance;
     vector_type vt = c->table->options.v_type;
+    if (vt == VECTOR_TYPE_BIT) vd = VECTOR_DISTANCE_HAMMING;  // Force Hamming for BIT type
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
-    
+    int dist_size = (vt == VECTOR_TYPE_BIT) ? ((dimension + 7) / 8) : dimension;
+
     while (1) {
         rc = sqlite3_step(vm);
         if (rc == SQLITE_DONE) {rc = SQLITE_OK; goto cleanup;}
         if (rc != SQLITE_ROW) goto cleanup;
         if (sqlite3_column_type(vm, 1) == SQLITE_NULL) continue;
-        
+
         float *v2 = (float *)sqlite3_column_blob(vm, 1);
         if (v2 == NULL) continue;
-        
-        float distance = distance_fn((const void *)v1, (const void *)v2, dimension);
+
+        float distance = distance_fn((const void *)v1, (const void *)v2, dist_size);
         if (nearly_zero_float32(distance)) distance = 0.0;
         VECTOR_PRINT((void*)v2, vt, dimension);
         
@@ -2486,14 +2517,15 @@ static int vStreamScanCursorRun (sqlite3 *db, vFullScanCursor *c, const void *v1
     // compute distance function
     vector_distance vd = c->table->options.v_distance;
     vector_type vt = c->table->options.v_type;
+    if (vt == VECTOR_TYPE_BIT) vd = VECTOR_DISTANCE_HAMMING;  // Force Hamming for BIT type
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
-    
+
     c->stream.distance_fn = distance_fn;
     c->stream.vm = vm;
-    
+
     if (sql) sqlite3_free(sql);
     return SQLITE_OK;
-    
+
 cleanup:
     if (sql) sqlite3_free(sql);
     if (vm) sqlite3_finalize(vm);
@@ -2842,7 +2874,12 @@ SQLITE_VECTOR_API int sqlite3_vector_init (sqlite3 *db, char **pzErrMsg, const s
     if (rc != SQLITE_OK) goto cleanup;
     rc = sqlite3_create_function(db, "vector_as_u8", 2, SQLITE_UTF8, ctx, vector_as_u8, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
+    rc = sqlite3_create_function(db, "vector_as_bit", 1, SQLITE_UTF8, ctx, vector_as_bit, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    rc = sqlite3_create_function(db, "vector_as_bit", 2, SQLITE_UTF8, ctx, vector_as_bit, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
     rc = sqlite3_create_module(db, "vector_full_scan", &vFullScanModule, ctx);
     if (rc != SQLITE_OK) goto cleanup;
     
