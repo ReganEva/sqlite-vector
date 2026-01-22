@@ -38,14 +38,16 @@ typedef enum {
     VECTOR_TYPE_F16,
     VECTOR_TYPE_BF16,
     VECTOR_TYPE_U8,
-    VECTOR_TYPE_I8
+    VECTOR_TYPE_I8,
+    VECTOR_TYPE_BIT
 } vector_type;
-#define VECTOR_TYPE_MAX         6
+#define VECTOR_TYPE_MAX         7
 
 typedef enum {
     VECTOR_QUANT_AUTO = 0,
     VECTOR_QUANT_U8BIT = 1,
-    VECTOR_QUANT_S8BIT = 2
+    VECTOR_QUANT_S8BIT = 2,
+    VECTOR_QUANT_1BIT = 3
 } vector_qtype;
 
 typedef enum {
@@ -54,8 +56,9 @@ typedef enum {
     VECTOR_DISTANCE_COSINE,
     VECTOR_DISTANCE_DOT,
     VECTOR_DISTANCE_L1,
+    VECTOR_DISTANCE_HAMMING
 } vector_distance;
-#define VECTOR_DISTANCE_MAX     6
+#define VECTOR_DISTANCE_MAX     7
 
 typedef float (*distance_function_t)(const void *v1, const void *v2, int n);
 

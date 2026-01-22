@@ -1006,6 +1006,67 @@ float int8_distance_cosine_sse2 (const void *v1, const void *v2, int n) {
     return 1.0f - cosine_sim;
 }
 
+// MARK: - BIT -
+
+static inline __m128i popcount_sse2 (__m128i v) {
+    // Classic parallel bit count algorithm vectorized for SSE2
+    
+    const __m128i mask1 = _mm_set1_epi8(0x55);  // 01010101
+    const __m128i mask2 = _mm_set1_epi8(0x33);  // 00110011
+    const __m128i mask4 = _mm_set1_epi8(0x0f);  // 00001111
+    
+    // x = x - ((x >> 1) & 0x55555555)
+    __m128i t = _mm_and_si128(_mm_srli_epi16(v, 1), mask1);
+    v = _mm_sub_epi8(v, t);
+    
+    // x = (x & 0x33333333) + ((x >> 2) & 0x33333333)
+    t = _mm_and_si128(_mm_srli_epi16(v, 2), mask2);
+    v = _mm_add_epi8(_mm_and_si128(v, mask2), t);
+    
+    // x = (x + (x >> 4)) & 0x0f0f0f0f
+    t = _mm_srli_epi16(v, 4);
+    v = _mm_and_si128(_mm_add_epi8(v, t), mask4);
+    
+    // Now each byte contains popcount for that byte (0-8)
+    return v;
+}
+
+float bit1_distance_hamming_sse2 (const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+    __m128i acc = _mm_setzero_si128();
+    int i = 0;
+    
+    // Process 16 bytes at a time
+    for (; i + 16 <= n; i += 16) {
+        __m128i va = _mm_loadu_si128((const __m128i *)(a + i));
+        __m128i vb = _mm_loadu_si128((const __m128i *)(b + i));
+        __m128i xored = _mm_xor_si128(va, vb);
+        __m128i popcnt = popcount_sse2(xored);
+        
+        // Sum bytes using SAD (sum of absolute differences against zero)
+        // This sums all 16 bytes into two 64-bit values
+        acc = _mm_add_epi64(acc, _mm_sad_epu8(popcnt, _mm_setzero_si128()));
+    }
+    
+    // Horizontal sum of the two 64-bit accumulators
+    int distance = _mm_cvtsi128_si64(acc) + _mm_cvtsi128_si64(_mm_srli_si128(acc, 8));
+    
+    // Handle remainder with scalar code
+    for (; i < n; i++) {
+        #if defined(__GNUC__) || defined(__clang__)
+        distance += __builtin_popcount(a[i] ^ b[i]);
+        #else
+        uint8_t x = a[i] ^ b[i];
+        x = x - ((x >> 1) & 0x55);
+        x = (x & 0x33) + ((x >> 2) & 0x33);
+        distance += (x + (x >> 4)) & 0x0f;
+        #endif
+    }
+    
+    return (float)distance;
+}
+
 #endif
 
 // MARK: -
@@ -1041,6 +1102,8 @@ void init_distance_functions_sse2 (void) {
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_sse2;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_sse2;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_sse2;
+    
+    dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_sse2;
     
     distance_backend_name = "SSE2";
 #endif

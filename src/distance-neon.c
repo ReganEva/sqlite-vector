@@ -1230,6 +1230,38 @@ float int8_distance_l1_neon(const void *v1, const void *v2, int n) {
 
     return (float)final;
 }
+
+// MARK: - BIT -
+
+float bit1_distance_hamming_neon (const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+    uint64x2_t acc = vdupq_n_u64(0);
+    int i = 0;
+    
+    // Process 16 bytes at a time
+    for (; i + 16 <= n; i += 16) {
+        uint8x16_t va = vld1q_u8(a + i);
+        uint8x16_t vb = vld1q_u8(b + i);
+        uint8x16_t xored = veorq_u8(va, vb);
+        
+        // vcntq_u8: popcount per byte
+        uint8x16_t popcnt = vcntq_u8(xored);
+        
+        // Sum bytes to 64-bit accumulators
+        acc = vpadalq_u32(acc, vpaddlq_u16(vpaddlq_u8(popcnt)));
+    }
+    
+    int distance = (int)(vgetq_lane_u64(acc, 0) + vgetq_lane_u64(acc, 1));
+    
+    // Handle remainder
+    for (; i < n; i++) {
+        distance += __builtin_popcount(a[i] ^ b[i]);
+    }
+    
+    return (float)distance;
+}
+
 #endif
 
 // MARK: -
@@ -1265,6 +1297,8 @@ void init_distance_functions_neon (void) {
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_neon;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_neon;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_neon;
+    
+    dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_neon;
     
     distance_backend_name = "NEON";
 #endif

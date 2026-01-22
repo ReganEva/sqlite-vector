@@ -693,6 +693,42 @@ float int8_distance_l1_cpu (const void *v1, const void *v2, int n) {
     return sum;
 }
 
+// MARK: - BIT -
+
+static inline int popcount64(uint64_t x) {
+    #if defined(__GNUC__) || defined(__clang__)
+    return __builtin_popcountll(x);
+    #else
+    // fallback: bit manipulation
+    x = x - ((x >> 1) & 0x5555555555555555ULL);
+    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
+    x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+    return (x * 0x0101010101010101ULL) >> 56;
+    #endif
+}
+
+float bit1_distance_hamming_cpu (const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+    
+    int distance = 0;
+    int i = 0;
+    
+    // process 8 bytes at a time
+    for (; i + 8 <= n; i += 8) {
+        uint64_t xa = *(const uint64_t *)(a + i);
+        uint64_t xb = *(const uint64_t *)(b + i);
+        distance += popcount64(xa ^ xb);
+    }
+    
+    // handle remainder
+    for (; i < n; i++) {
+        distance += popcount64(a[i] ^ b[i]);
+    }
+    
+    return (float)distance;
+}
+
 // MARK: - ENTRYPOINT -
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -845,6 +881,9 @@ void init_cpu_functions (void) {
                 [VECTOR_TYPE_BF16] = bfloat16_distance_l1_cpu,
                 [VECTOR_TYPE_U8]  = uint8_distance_l1_cpu,
                 [VECTOR_TYPE_I8]  = int8_distance_l1_cpu,
+            },
+            [VECTOR_DISTANCE_HAMMING] = {
+                [VECTOR_TYPE_BIT] = bit1_distance_hamming_cpu
             }
     };
     

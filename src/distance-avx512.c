@@ -48,7 +48,7 @@ static inline bool block_has_l2_inf_mismatch_16(const uint16_t* a, const uint16_
     return false;
 }
 
-/* 16×bf16 -> 16×f32: widen to u32, shift <<16, reinterpret as f32 */
+/* 16ï¿½bf16 -> 16ï¿½f32: widen to u32, shift <<16, reinterpret as f32 */
 static inline __m512 bf16x16_to_f32x16_loadu(const uint16_t* p) {
     // Load 16x u16 (256 bits)
     __m256i v16 = _mm256_loadu_si256((const __m256i*)p);
@@ -846,6 +846,72 @@ float int8_distance_cosine_avx512(const void* a, const void* b, int n) {
     return 1.0f - cosine_similarity;
 }
 
+// MARK: - BIT -
+
+// AVX-512 popcount using lookup table (works on all AVX-512 CPUs)
+static inline __m512i popcount_avx512(__m512i v) {
+    // Lookup table for popcount of 4-bit values
+    const __m512i popcount_lut = _mm512_set_epi8(
+        4, 3, 3, 2, 3, 2, 2, 1, 3, 2, 2, 1, 2, 1, 1, 0,
+        4, 3, 3, 2, 3, 2, 2, 1, 3, 2, 2, 1, 2, 1, 1, 0,
+        4, 3, 3, 2, 3, 2, 2, 1, 3, 2, 2, 1, 2, 1, 1, 0,
+        4, 3, 3, 2, 3, 2, 2, 1, 3, 2, 2, 1, 2, 1, 1, 0
+    );
+    const __m512i low_mask = _mm512_set1_epi8(0x0f);
+
+    __m512i lo = _mm512_and_si512(v, low_mask);
+    __m512i hi = _mm512_and_si512(_mm512_srli_epi16(v, 4), low_mask);
+    __m512i cnt_lo = _mm512_shuffle_epi8(popcount_lut, lo);
+    __m512i cnt_hi = _mm512_shuffle_epi8(popcount_lut, hi);
+    return _mm512_add_epi8(cnt_lo, cnt_hi);
+}
+
+// Hamming distance for 1-bit packed binary vectors
+// n = number of dimensions (bits), not bytes
+static float bit1_distance_hamming_avx512(const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+    int num_bytes = (n + 7) / 8;
+
+    __m512i acc = _mm512_setzero_si512();
+    int i = 0;
+
+    // Process 64 bytes at a time
+    for (; i + 64 <= num_bytes; i += 64) {
+        __m512i va = _mm512_loadu_si512((const __m512i *)(a + i));
+        __m512i vb = _mm512_loadu_si512((const __m512i *)(b + i));
+        __m512i xored = _mm512_xor_si512(va, vb);
+
+#if defined(__AVX512VPOPCNTDQ__)
+        // Native popcount (Ice Lake+)
+        __m512i popcnt = _mm512_popcnt_epi64(xored);
+        acc = _mm512_add_epi64(acc, popcnt);
+#else
+        // Lookup table popcount (Skylake-X compatible)
+        __m512i popcnt = popcount_avx512(xored);
+        // Sum bytes to 64-bit using SAD against zero
+        acc = _mm512_add_epi64(acc, _mm512_sad_epu8(popcnt, _mm512_setzero_si512()));
+#endif
+    }
+
+    // Horizontal sum
+    uint64_t distance = _mm512_reduce_add_epi64(acc);
+
+    // Handle remaining bytes with scalar code
+    for (; i < num_bytes; i++) {
+#if defined(__GNUC__) || defined(__clang__)
+        distance += __builtin_popcount(a[i] ^ b[i]);
+#else
+        uint8_t x = a[i] ^ b[i];
+        x = x - ((x >> 1) & 0x55);
+        x = (x & 0x33) + ((x >> 2) & 0x33);
+        distance += (x + (x >> 4)) & 0x0f;
+#endif
+    }
+
+    return (float)distance;
+}
+
 #endif
 
 // MARK: -
@@ -881,6 +947,8 @@ void init_distance_functions_avx512(void) {
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_avx512;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_avx512;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_avx512;
+
+    dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_avx512;
 
     distance_backend_name = "AVX512";
 #endif

@@ -10,6 +10,6 @@
 
 #include <stdio.h>
 
-void init_distance_functions_avx512(void);
+void init_distance_functions_avx512 (void);
 
 #endif

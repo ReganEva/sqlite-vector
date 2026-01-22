@@ -765,25 +765,106 @@ static inline void quantize_i8 (const int8_t *v, uint8_t *q, float offset, float
     else quantize_i8_to_signed8bit(v, (int8_t *)q, offset, scale, dim);
 }
 
+static void quantize_binary (const float *input, uint8_t *output, int dim, bool is_binary_mean) {
+      float threshold = 0.0f;
+
+      if (is_binary_mean) {
+          // compute mean as threshold
+          float sum = 0.0f;
+          for (int i = 0; i < dim; i++) {
+              sum += input[i];
+          }
+          threshold = sum / dim;
+      }
+
+      // quantize
+      memset(output, 0, (dim + 7) / 8);
+      for (int i = 0; i < dim; i++) {
+          if (input[i] >= threshold) {
+              output[i / 8] |= (1 << (i % 8));
+          }
+      }
+  }
+
+static void quantize_binary_f16 (const uint16_t *input, uint8_t *output, int dim, bool is_binary_mean) {
+    float threshold = 0.0f;
+
+    if (is_binary_mean) {
+        float sum = 0.0f;
+        for (int i = 0; i < dim; i++) {
+            sum += float16_to_float32(input[i]);
+        }
+        threshold = sum / dim;
+    }
+
+    memset(output, 0, (dim + 7) / 8);
+    for (int i = 0; i < dim; i++) {
+        if (float16_to_float32(input[i]) >= threshold) {
+            output[i / 8] |= (1 << (i % 8));
+        }
+    }
+}
+
+static void quantize_binary_bf16 (const uint16_t *input, uint8_t *output, int dim, bool is_binary_mean) {
+    float threshold = 0.0f;
+
+    if (is_binary_mean) {
+        float sum = 0.0f;
+        for (int i = 0; i < dim; i++) {
+            sum += bfloat16_to_float32(input[i]);
+        }
+        threshold = sum / dim;
+    }
+
+    memset(output, 0, (dim + 7) / 8);
+    for (int i = 0; i < dim; i++) {
+        if (bfloat16_to_float32(input[i]) >= threshold) {
+            output[i / 8] |= (1 << (i % 8));
+        }
+    }
+}
+
+static void quantize_binary_u8 (const uint8_t *input, uint8_t *output, int dim) {
+    // For unsigned 8-bit, threshold at 128 (midpoint)
+    memset(output, 0, (dim + 7) / 8);
+    for (int i = 0; i < dim; i++) {
+        if (input[i] >= 128) {
+            output[i / 8] |= (1 << (i % 8));
+        }
+    }
+}
+
+static void quantize_binary_i8 (const int8_t *input, uint8_t *output, int dim) {
+    // For signed 8-bit, threshold at 0 (sign-based)
+    memset(output, 0, (dim + 7) / 8);
+    for (int i = 0; i < dim; i++) {
+        if (input[i] >= 0) {
+            output[i / 8] |= (1 << (i % 8));
+        }
+    }
+}
+
 // MARK: - General Utils -
 
 static size_t vector_type_to_size (vector_type type) {
     switch (type) {
-        case VECTOR_TYPE_F32: return sizeof(float);
-        case VECTOR_TYPE_F16: return sizeof(uint16_t);
-        case VECTOR_TYPE_BF16: return sizeof(uint16_t);
-        case VECTOR_TYPE_U8: return sizeof(uint8_t);
-        case VECTOR_TYPE_I8: return sizeof(int8_t);
+        case VECTOR_TYPE_F32:  return sizeof(float);        // 4 bytes
+        case VECTOR_TYPE_F16:  return sizeof(uint16_t);     // 2 bytes
+        case VECTOR_TYPE_BF16: return sizeof(uint16_t);     // 2 bytes
+        case VECTOR_TYPE_U8:   return sizeof(uint8_t);      // 1 byte
+        case VECTOR_TYPE_I8:   return sizeof(int8_t);       // 1 byte
+        case VECTOR_TYPE_BIT:  return 0;                    // Special: use vector_bytes_for_dim()
     }
-    return 0;
+    return SIZE_T_MAX;                                      // error
 }
 
 static vector_type vector_name_to_type (const char *vname) {
-    if (strcasecmp(vname, "FLOAT32") == 0) return VECTOR_TYPE_F32;
-    if (strcasecmp(vname, "FLOAT16") == 0) return VECTOR_TYPE_F16;
-    if (strcasecmp(vname, "FLOATB16") == 0) return VECTOR_TYPE_BF16;
-    if (strcasecmp(vname, "UINT8") == 0) return VECTOR_TYPE_U8;
-    if (strcasecmp(vname, "INT8") == 0) return VECTOR_TYPE_I8;
+    if ((strcasecmp(vname, "F32") == 0) || (strcasecmp(vname, "FLOAT32") == 0)) return VECTOR_TYPE_F32;
+    if ((strcasecmp(vname, "F16") == 0) || (strcasecmp(vname, "FLOAT16") == 0)) return VECTOR_TYPE_F16;
+    if ((strcasecmp(vname, "BF16") == 0) || (strcasecmp(vname, "FLOATB16") == 0)) return VECTOR_TYPE_BF16;
+    if ((strcasecmp(vname, "U8") == 0) || (strcasecmp(vname, "UINT8") == 0)) return VECTOR_TYPE_U8;
+    if ((strcasecmp(vname, "I8") == 0) || (strcasecmp(vname, "INT8") == 0)) return VECTOR_TYPE_I8;
+    if (strcasecmp(vname, "BIT") == 0 || strcasecmp(vname, "BINARY") == 0 || strcasecmp(vname, "1BIT") == 0) return VECTOR_TYPE_BIT;
     return 0;
 }
 
@@ -794,13 +875,23 @@ const char *vector_type_to_name (vector_type type) {
         case VECTOR_TYPE_BF16: return "FLOATB16";
         case VECTOR_TYPE_U8: return "UINT8";
         case VECTOR_TYPE_I8: return "INT8";
+        case VECTOR_TYPE_BIT:  return "BIT";
     }
     return "N/A";
+}
+
+static size_t vector_bytes_for_dim (vector_type type, int dim) {
+    // returns total bytes needed to store a vector of given type and dimension
+    if (type == VECTOR_TYPE_BIT) {
+        return (size_t)((dim + 7) / 8);  // Ceil division: pack 8 dimensions per byte
+    }
+    return (size_t)dim * vector_type_to_size(type);
 }
 
 static vector_qtype quant_name_to_type (const char *qname) {
     if (strcasecmp(qname, "UINT8") == 0) return VECTOR_QUANT_U8BIT;
     if (strcasecmp(qname, "INT8") == 0) return VECTOR_QUANT_S8BIT;
+    if (strcasecmp(qname, "1BIT") == 0 || strcasecmp(qname, "BIT") == 0 || strcasecmp(qname, "BINARY") == 0) return VECTOR_QUANT_1BIT;
     return -1;
 }
 
@@ -823,6 +914,7 @@ const char *vector_distance_to_name (vector_distance type) {
         case VECTOR_DISTANCE_COSINE: return "COSINE";
         case VECTOR_DISTANCE_DOT: return "DOT";
         case VECTOR_DISTANCE_L1: return "L1";
+        case VECTOR_DISTANCE_HAMMING: return "HAMMING";
     }
     return "N/A";
 }
@@ -859,6 +951,12 @@ static void vector_print (void *buf, vector_type type, int n) {
             case VECTOR_TYPE_I8: {
                 int8_t *u = (int8_t *)buf;
                 printf("%d,", u[i]);
+            }
+            break;
+                
+            case VECTOR_TYPE_BIT: {
+                uint8_t *b = (uint8_t *)buf;
+                printf("%d,", (b[i / 8] >> (i % 8)) & 1);
             }
             break;
         }
@@ -1168,7 +1266,8 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     vector_type type = t_ctx->options.v_type;
     
     // compute size of a single quant, format is: rowid + quantize dimensions
-    size_t q_size = sizeof(int64_t) + (size_t)dim * sizeof(uint8_t);
+    size_t quant_bytes = (qtype == VECTOR_QUANT_1BIT) ? ((dim + 7) / 8) : (dim * sizeof(uint8_t));
+    size_t q_size = sizeof(int64_t) + quant_bytes;
     if (q_size == 0) {
         sqlite3_result_error(context, "Vector dimension is zero, which is not possible", -1);
         return SQLITE_MISUSE;
@@ -1223,7 +1322,7 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
         if (!blob) continue;
         
         int blob_size = sqlite3_column_bytes(vm, 1);
-        size_t need_bytes = (size_t)dim * (size_t)vector_type_to_size(type);
+        size_t need_bytes = vector_bytes_for_dim(type, dim);
         if (blob_size < need_bytes) {
             context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld", (long long)sqlite3_column_int64(vm, 0));
             rc = SQLITE_ERROR;
@@ -1309,16 +1408,34 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
         data += sizeof(int64_t);
         
         // quantize vector
-        switch (type) {
-            case VECTOR_TYPE_F32: quantize_float32((const float *)blob, data, offset, scale, dim, qtype); break;
-            case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)blob, data, offset, scale, dim, qtype); break;
-            case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)blob, data, offset, scale, dim, qtype); break;
-            case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)blob, data, offset, scale, dim, qtype); break;
-            case VECTOR_TYPE_I8: quantize_i8((const int8_t *)blob, data, offset, scale, dim, qtype); break;
+        if (qtype == VECTOR_QUANT_1BIT) {
+            // 1-bit quantization: convert source to binary based on type
+            switch (type) {
+                case VECTOR_TYPE_F32: quantize_binary((const float *)blob, data, dim, false); break;
+                case VECTOR_TYPE_F16: quantize_binary_f16((const uint16_t *)blob, data, dim, false); break;
+                case VECTOR_TYPE_BF16: quantize_binary_bf16((const uint16_t *)blob, data, dim, false); break;
+                case VECTOR_TYPE_U8: quantize_binary_u8((const uint8_t *)blob, data, dim); break;
+                case VECTOR_TYPE_I8: quantize_binary_i8((const int8_t *)blob, data, dim); break;
+                case VECTOR_TYPE_BIT: memcpy(data, blob, (dim + 7) / 8); break; // Already binary
+            }
+        } else {
+            // 8-bit quantization (U8BIT or S8BIT)
+            switch (type) {
+                case VECTOR_TYPE_F32: quantize_float32((const float *)blob, data, offset, scale, dim, qtype); break;
+                case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)blob, data, offset, scale, dim, qtype); break;
+                case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)blob, data, offset, scale, dim, qtype); break;
+                case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)blob, data, offset, scale, dim, qtype); break;
+                case VECTOR_TYPE_I8: quantize_i8((const int8_t *)blob, data, offset, scale, dim, qtype); break;
+                case VECTOR_TYPE_BIT: memcpy(data, blob, (dim + 7) / 8); break; // BIT to 8-bit: just copy
+            }
         }
-        VECTOR_PRINT((void *)data, (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8, dim);
         
-        data += (dim * sizeof(uint8_t));
+        #if DEBUG_VECTOR_SERIALIZATION
+        vector_type qprint = (qtype == VECTOR_QUANT_1BIT) ? VECTOR_TYPE_BIT : (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8;
+        VECTOR_PRINT((void *)data, qprint, dim);
+        #endif
+        
+        data += (qtype == VECTOR_QUANT_1BIT) ? ((dim + 7) / 8) : (dim * sizeof(uint8_t));
         max_rowid = rowid;
         ++n_processed;
         ++tot_processed;
@@ -1693,15 +1810,24 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
     int dimension = (argc == 2) ? sqlite3_value_int(argv[1]) : 0;
     
     if (value_type == SQLITE_BLOB) {
-        // the only check we can perform is that the blob size is an exact multiplier of the vector type
-        if (value_size % vector_type_to_size(type) != 0) {
-            context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': size must be a multiple of %d bytes", vector_type_to_name(type), vector_type_to_size(type));
-            return;
-        }
-        if (dimension > 0) {
-            int expected_size = (int)vector_type_to_size(type) * dimension;
-            if (value_size != expected_size) {
-                context_result_error(context, SQLITE_ERROR, "Invalid BLOB size for format '%s': expected dimension should be %d (BLOB is %d bytes instead of %d)", vector_type_to_name(type), dimension, value_size, expected_size);
+        if (type == VECTOR_TYPE_BIT) {
+            // For bit vectors, any size is valid (dimensions = size * 8, minus padding)
+            // Optionally validate against expected dimension if provided
+            if (dimension > 0) {
+                size_t expected_size = vector_bytes_for_dim(type, dimension);
+                if (value_size != expected_size) {
+                    context_result_error(context, SQLITE_ERROR,
+                                         "Invalid BLOB size for format '%s': expected %d bytes for %d dimensions (got %d bytes)",
+                                         vector_type_to_name(type), (int)expected_size, dimension, value_size);
+                    return;
+                }
+            }
+        } else {
+            // the only check we can perform is that the blob size is an exact multiplier of the vector type
+            if (value_size % vector_type_to_size(type) != 0) {
+                context_result_error(context, SQLITE_ERROR,
+                                     "Invalid BLOB size for format '%s': size must be a multiple of %d bytes",
+                                     vector_type_to_name(type), vector_type_to_size(type));
                 return;
             }
         }
@@ -1969,7 +2095,7 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
 
     // QUANTIZATION sizes
     const size_t rowid_size = sizeof(int64_t);
-    const size_t vector_size = (size_t)dimension * sizeof(uint8_t);
+    const size_t vector_size = (size_t)c->stream.vsize;  // correctly set by caller for 1-bit or 8-bit
     const size_t total_stride = rowid_size + vector_size;
 
     // QUANTIZED IN-MEMORY
@@ -1990,7 +2116,7 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
 
         
         // no NULL vectors here by construction
-        float distance = distance_fn((const void *)v1, (const void *)vector_data, dimension);
+        float distance = distance_fn((const void *)v1, (const void *)vector_data, c->stream.vsize);
         if (nearly_zero_float32(distance)) distance = 0.0f;
 
         c->stream.distance = distance;
@@ -2016,7 +2142,7 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
     const uint8_t *current_data = data + (i * total_stride);
     const uint8_t *vector_data  = current_data + rowid_size;
 
-    float distance = distance_fn((const void *)v1, (const void *)vector_data, dimension);
+    float distance = distance_fn((const void *)v1, (const void *)vector_data, c->stream.vsize);
     if (nearly_zero_float32(distance)) distance = 0.0f;
 
     c->stream.distance = distance;
@@ -2157,24 +2283,28 @@ static int vQuantRunMemory(vFullScanCursor *c, uint8_t *v, vector_qtype qtype, i
     const int counter = c->table->precounter;
     const uint8_t *data = c->table->preloaded;
     const size_t rowid_size = sizeof(int64_t);
-    const size_t vector_size = dim * sizeof(uint8_t);
+    const size_t vector_size = (qtype == VECTOR_QUANT_1BIT) ? ((dim + 7) / 8) : (dim * sizeof(uint8_t));
     const size_t total_stride = rowid_size + vector_size;
 
     double *distance = c->distance;
     int64_t *rowids = (int64_t *)c->rowids;
     int max_index = c->max_index;
     double current_max = distance[max_index];
-    
+
     // compute distance function
     vector_distance vd = c->table->options.v_distance;
     vector_type vt = (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8;
+    if (qtype == VECTOR_QUANT_1BIT) {
+        vt = VECTOR_TYPE_BIT;
+        vd = VECTOR_DISTANCE_HAMMING;
+    }
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
-    
+
     for (int i = 0; i < counter; ++i) {
         const uint8_t *current_data = data + (i * total_stride);
         const uint8_t *vector_data = current_data + rowid_size;
 
-        float dist = distance_fn((const void *)v, (const void *)vector_data, dim);
+        float dist = distance_fn((const void *)v, (const void *)vector_data, (int)vector_size);
         if (nearly_zero_float32(dist)) dist = 0.0;
         
         if (dist < current_max) {
@@ -2194,29 +2324,47 @@ static int vQuantRunMemory(vFullScanCursor *c, uint8_t *v, vector_qtype qtype, i
 static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1size) {
     // quantize target vector
     int dimension = c->table->options.v_dim;
-    uint8_t *v = (uint8_t *)sqlite3_malloc(dimension * sizeof(int8_t));
+    vector_qtype qtype = c->table->options.q_type;
+    size_t alloc_size = (qtype == VECTOR_QUANT_1BIT) ? ((dimension + 7) / 8) : (dimension * sizeof(int8_t));
+    uint8_t *v = (uint8_t *)sqlite3_malloc64(alloc_size);
     if (!v) return SQLITE_NOMEM;
     
     // quantize vector
-    vector_qtype qtype = c->table->options.q_type;
     float offset = c->table->offset;
     float scale = c->table->scale;
     vector_type type = c->table->options.v_type;
-    
-    switch (type) {
-        case VECTOR_TYPE_F32: quantize_float32((const float *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_I8: quantize_i8((const int8_t *)v1, v, offset, scale, dimension, qtype); break;
+
+    if (qtype == VECTOR_QUANT_1BIT) {
+        // 1-bit quantization: convert source to binary based on type
+        switch (type) {
+            case VECTOR_TYPE_F32: quantize_binary((const float *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_F16: quantize_binary_f16((const uint16_t *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_BF16: quantize_binary_bf16((const uint16_t *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_U8: quantize_binary_u8((const uint8_t *)v1, v, dimension); break;
+            case VECTOR_TYPE_I8: quantize_binary_i8((const int8_t *)v1, v, dimension); break;
+            case VECTOR_TYPE_BIT: memcpy(v, v1, (dimension + 7) / 8); break; // Already binary
+        }
+    } else {
+        // 8-bit quantization (U8BIT or S8BIT)
+        switch (type) {
+            case VECTOR_TYPE_F32: quantize_float32((const float *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_I8: quantize_i8((const int8_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_BIT: memcpy(v, v1, (dimension + 7) / 8); break; // BIT to 8-bit: just copy
+        }
     }
-    
+
     if (c->table->preloaded) {
         int rc = vQuantRunMemory(c, v, qtype, dimension);
         if (v) sqlite3_free(v);
         return rc;
     }
-    VECTOR_PRINT((void*)v, (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8, dimension);
+    #if DEBUG_VECTOR_SERIALIZATION
+    vector_type qprint = (qtype == VECTOR_QUANT_1BIT) ? VECTOR_TYPE_BIT : (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8;
+    VECTOR_PRINT((void*)v, qprint, dimension);
+    #endif
     
     char sql[STATIC_SQL_SIZE];
     generate_select_quant_table(c->table->t_name, c->table->c_name, sql);
@@ -2226,12 +2374,17 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
     
     // precompute constants
     const size_t rowid_size = sizeof(int64_t);
-    const size_t vector_size = dimension * sizeof(uint8_t);
+    const size_t vector_size = (qtype == VECTOR_QUANT_1BIT) ? ((dimension + 7) / 8) : (dimension * sizeof(uint8_t));
     const size_t total_stride = rowid_size + vector_size;
     
     // compute distance function
     vector_distance vd = c->table->options.v_distance;
     vector_type vt = (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8;
+    if (qtype == VECTOR_QUANT_1BIT) {
+        // in case of 1BIT quantization force distance to alway be hamming
+        vt = VECTOR_TYPE_BIT;
+        vd = VECTOR_DISTANCE_HAMMING;
+    }
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
     
     while (1) {
@@ -2248,7 +2401,7 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
         for (int i=0; i<counter; ++i) {
             const uint8_t *current_data = data + (i * total_stride);
             const uint8_t *vector_data = current_data + rowid_size;
-            float distance = distance_fn((const void *)v, (const void *)vector_data, dimension);
+            float distance = distance_fn((const void *)v, (const void *)vector_data, (int)vector_size);
             if (nearly_zero_float32(distance)) distance = 0.0;
             VECTOR_PRINT((void*)vector_data, vt, dimension);
             
@@ -2350,30 +2503,50 @@ cleanup:
 static int vStreamQuantCursorRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1size) {
     // quantize input vector
     int dimension = c->table->options.v_dim;
-    uint8_t *v = (uint8_t *)sqlite3_malloc(dimension * sizeof(int8_t));
+    vector_qtype qtype = c->table->options.q_type;
+    size_t alloc_size = (qtype == VECTOR_QUANT_1BIT) ? ((dimension + 7) / 8) : (dimension * sizeof(int8_t));
+    uint8_t *v = (uint8_t *)sqlite3_malloc64(alloc_size);
     if (!v) return SQLITE_NOMEM;
     
     // quantize vector
-    vector_qtype qtype = c->table->options.q_type;
     float offset = c->table->offset;
     float scale = c->table->scale;
     vector_type type = c->table->options.v_type;
-    
-    switch (type) {
-        case VECTOR_TYPE_F32: quantize_float32((const float *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)v1, v, offset, scale, dimension, qtype); break;
-        case VECTOR_TYPE_I8: quantize_i8((const int8_t *)v1, v, offset, scale, dimension, qtype); break;
+
+    if (qtype == VECTOR_QUANT_1BIT) {
+        // 1-bit quantization: convert source to binary based on type
+        switch (type) {
+            case VECTOR_TYPE_F32: quantize_binary((const float *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_F16: quantize_binary_f16((const uint16_t *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_BF16: quantize_binary_bf16((const uint16_t *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_U8: quantize_binary_u8((const uint8_t *)v1, v, dimension); break;
+            case VECTOR_TYPE_I8: quantize_binary_i8((const int8_t *)v1, v, dimension); break;
+            case VECTOR_TYPE_BIT: memcpy(v, v1, (dimension + 7) / 8); break; // Already binary
+        }
+    } else {
+        // 8-bit quantization (U8BIT or S8BIT)
+        switch (type) {
+            case VECTOR_TYPE_F32: quantize_float32((const float *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_F16: quantize_float16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_BF16: quantize_bfloat16((const uint16_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_U8: quantize_u8((const uint8_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_I8: quantize_i8((const int8_t *)v1, v, offset, scale, dimension, qtype); break;
+            case VECTOR_TYPE_BIT: memcpy(v, v1, (dimension + 7) / 8); break; // BIT to 8-bit: just copy
+        }
     }
-    
+
     c->stream.vector = (void *)v;
-    c->stream.vsize = (int)(dimension * sizeof(int8_t));
+    c->stream.vsize = (qtype == VECTOR_QUANT_1BIT) ? (int)((dimension + 7) / 8) : (int)(dimension * sizeof(int8_t));
     c->stream.vdim = dimension;
     
     // compute distance function
     vector_distance vd = c->table->options.v_distance;
     vector_type vt = (qtype == VECTOR_QUANT_U8BIT) ? VECTOR_TYPE_U8 : VECTOR_TYPE_I8;
+    if (qtype == VECTOR_QUANT_1BIT) {
+        // in case of 1BIT quantization force distance to always be hamming
+        vt = VECTOR_TYPE_BIT;
+        vd = VECTOR_DISTANCE_HAMMING;
+    }
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
     c->stream.distance_fn = distance_fn;
     

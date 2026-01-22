@@ -949,6 +949,47 @@ float int8_distance_cosine_avx2 (const void *a, const void *b, int n) {
     return 1.0f - cosine_similarity;
 }
 
+// MARK: - BIT -
+
+// lookup table for popcount of 4-bit values
+static const __m256i popcount_lut = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+
+static inline __m256i popcount_avx2(__m256i v) {
+    __m256i low_mask = _mm256_set1_epi8(0x0f);
+    __m256i lo = _mm256_and_si256(v, low_mask);
+    __m256i hi = _mm256_and_si256(_mm256_srli_epi16(v, 4), low_mask);
+    __m256i cnt_lo = _mm256_shuffle_epi8(popcount_lut, lo);
+    __m256i cnt_hi = _mm256_shuffle_epi8(popcount_lut, hi);
+    return _mm256_add_epi8(cnt_lo, cnt_hi);
+}
+
+float bit1_distance_hamming_avx2 (const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+    __m256i acc = _mm256_setzero_si256();
+    int i = 0;
+    
+    // Process 32 bytes at a time
+    for (; i + 32 <= n; i += 32) {
+        __m256i va = _mm256_loadu_si256((const __m256i *)(a + i));
+        __m256i vb = _mm256_loadu_si256((const __m256i *)(b + i));
+        __m256i xored = _mm256_xor_si256(va, vb);
+        __m256i popcnt = popcount_avx2(xored);
+        acc = _mm256_add_epi64(acc, _mm256_sad_epu8(popcnt, _mm256_setzero_si256()));
+    }
+    
+    // Horizontal sum
+    __m128i sum128 = _mm_add_epi64(_mm256_extracti128_si256(acc, 0), _mm256_extracti128_si256(acc, 1));
+    int distance = _mm_extract_epi64(sum128, 0) + _mm_extract_epi64(sum128, 1);
+    
+    // Handle remainder with scalar
+    for (; i < n; i++) {
+        distance += __builtin_popcount(a[i] ^ b[i]);
+    }
+    
+    return (float)distance;
+}
+
 #endif
 
 // MARK: -
@@ -984,6 +1025,8 @@ void init_distance_functions_avx2 (void) {
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_avx2;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_avx2;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_avx2;
+    
+    dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_avx2;
     
     distance_backend_name = "AVX2";
 #endif
