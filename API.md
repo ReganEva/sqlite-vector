@@ -78,6 +78,7 @@ This ensures that each vector can be uniquely identified and efficiently referen
   * `FLOATB16`
   * `INT8`
   * `UINT8`
+  * `1BIT`
 * `distance`: Distance function to use. Options:
 
   * `L2` (default)
@@ -85,6 +86,7 @@ This ensures that each vector can be uniquely identified and efficiently referen
   * `COSINE`
   * `DOT`
   * `L1`
+  * `HAMMING`
 
 **Example:**
 
@@ -115,11 +117,13 @@ If a quantization already exists for the specified table and column, it is repla
 **Available options:**
 
 * `max_memory`: Max memory to use for quantization (default: 30MB)
+* `qtype`: Quantization type: `UINT8`, `INT8` or `1BIT`
 
 **Example:**
 
 ```sql
 SELECT vector_quantize('documents', 'embedding', 'max_memory=50MB');
+SELECT vector_quantize('documents', 'embedding', 'qtype=BIT');
 ```
 
 ---
@@ -183,6 +187,8 @@ SELECT vector_quantize_cleanup('documents', 'embedding');
 ## `vector_as_i8(value)`
 
 ## `vector_as_u8(value)`
+
+## `vector_as_bit(value)`
 
 **Returns:** `BLOB`
 
