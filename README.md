@@ -1,6 +1,6 @@
 # SQLite Vector
 
-**SQLite Vector** is a cross-platform, ultra-efficient SQLite extension that brings vector search capabilities to your embedded database. It works seamlessly on **iOS, Android, Windows, Linux, and macOS**, using just **30MB of memory** by default. With support for **Float32, Float16, BFloat16, Int8, and UInt8**, and **highly optimized distance functions**, it's the ideal solution for **Edge AI** applications.
+**SQLite Vector** is a cross-platform, ultra-efficient SQLite extension that brings vector search capabilities to your embedded database. It works seamlessly on **iOS, Android, Windows, Linux, and macOS**, using just **30MB of memory** by default. With support for **Float32, Float16, BFloat16, Int8, UInt8 and 1Bit**, and **highly optimized distance functions**, it's the ideal solution for **Edge AI** applications.
 
 ## Highlights
 
@@ -175,6 +175,7 @@ You can store your vectors as `BLOB` columns in ordinary tables. Supported forma
 * `bfloat16` (2 bytes per element)
 * `int8` (1 byte per element)
 * `uint8` (1 byte per element)
+* `1bit` (1 bit per element)
 
 Simply insert a vector as a binary blob into your table. No special table types or schemas are required.
 
@@ -188,6 +189,7 @@ Optimized implementations available:
 * **L1 Distance (Manhattan)**
 * **Cosine Distance**
 * **Dot Product**
+* **Hamming Distance** (available only with 1bit vectors)
 
 These are implemented in pure C and optimized for SIMD when available, ensuring maximum performance on modern CPUs and mobile devices.
 
