@@ -337,7 +337,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: update npm # npm 11.5.1 is required for OIDC auth https://docs.npmjs.com/trusted-publishers
-        run: npm install -g npm@11.5.1
+        run: sudo npm install -g npm@11.5.1
 
       - name: build and publish npm packages
         if: steps.tag.outputs.version != ''
