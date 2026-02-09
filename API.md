@@ -219,7 +219,7 @@ INSERT INTO compressed_vectors(embedding) VALUES(vector_as_u8(X'010203'));
 
 ---
 
-## 🔍 `vector_full_scan(table, column, vector, k)`
+## 🔍 `vector_full_scan(table, column, vector [, k])`
 
 **Returns:** `Virtual Table (rowid, distance)`
 
@@ -232,18 +232,38 @@ Since this interface only returns rowid and distance, if you need to access addi
 * `table` (TEXT): Name of the target table.
 * `column` (TEXT): Column containing vectors.
 * `vector` (BLOB or JSON): The query vector.
-* `k` (INTEGER): Number of nearest neighbors to return.
+* `k` (INTEGER, optional): Number of nearest neighbors to return. When provided, the module collects the top-k results sorted by distance. When omitted, the module operates in **streaming mode** — rows are returned progressively as they are scanned, enabling standard SQL clauses such as `WHERE` and `LIMIT` to control filtering and result count.
 
-**Example:**
+**Examples:**
 
 ```sql
+-- Top-k mode: return the 5 nearest neighbors, sorted by distance
 SELECT rowid, distance
 FROM vector_full_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'), 5);
 ```
 
+```sql
+-- Streaming mode: progressively scan all rows, apply SQL filters
+SELECT rowid, distance
+FROM vector_full_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'))
+LIMIT 5;
+```
+
+```sql
+-- Streaming mode with JOIN and filtering
+SELECT
+    v.rowid,
+    row_number() OVER (ORDER BY v.distance) AS rank_number,
+    v.distance
+FROM vector_full_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]')) AS v
+    JOIN documents ON documents.rowid = v.rowid
+WHERE documents.category = 'science'
+LIMIT 10;
+```
+
 ---
 
-## ⚡ `vector_quantize_scan(table, column, vector, k)`
+## ⚡ `vector_quantize_scan(table, column, vector [, k])`
 
 **Returns:** `Virtual Table (rowid, distance)`
 
@@ -257,7 +277,7 @@ You **must run `vector_quantize()`** before using `vector_quantize_scan()` and w
 * `table` (TEXT): Name of the target table.
 * `column` (TEXT): Column containing vectors.
 * `vector` (BLOB or JSON): The query vector.
-* `k` (INTEGER): Number of nearest neighbors to return.
+* `k` (INTEGER, optional): Number of nearest neighbors to return. When provided, the module collects the top-k results sorted by distance. When omitted, the module operates in **streaming mode** — rows are returned progressively, enabling standard SQL clauses such as `WHERE` and `LIMIT`.
 
 **Performance Highlights:**
 
@@ -265,73 +285,23 @@ You **must run `vector_quantize()`** before using `vector_quantize_scan()` and w
 * Uses **<50MB** of RAM.
 * Achieves **>0.95 recall**.
 
-**Example:**
+**Examples:**
 
 ```sql
+-- Top-k mode: return the 10 nearest neighbors, sorted by distance
 SELECT rowid, distance
 FROM vector_quantize_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'), 10);
 ```
 
----
-
-## 🔁 Streaming Interfaces
-
-### `vector_full_scan_stream` and `vector_quantize_scan_stream`
-
-**Returns:** `Virtual Table (rowid, distance)`
-
-**Description:**
-These streaming interfaces provide the same functionality as `vector_full_scan` and `vector_quantize_scan`, respectively, but are designed for incremental or filtered processing of results.
-
-Unlike their non-streaming counterparts, these functions **omit the fourth parameter (`k`)** and allow you to use standard SQL clauses such as `WHERE` and `LIMIT` to control filtering and result count. Since this interface only returns rowid and distance, if you need to access additional columns from the original table, you must use a SELF JOIN.
-
-This makes them ideal for combining vector search with additional query conditions or progressive result consumption in streaming applications.
-
-**Parameters:**
-
-* `table` (TEXT): Name of the target table.
-* `column` (TEXT): Column containing vectors.
-* `vector` (BLOB or JSON): The query vector.
-
-**Key Differences from Non-Streaming Variants:**
-
-| Function                      | Equivalent To          | Requires `k` | Supports `WHERE` | Supports `LIMIT` |
-| ----------------------------- | ---------------------- | ------------ | ---------------- | ---------------- |
-| `vector_full_scan_stream`     | `vector_full_scan`     | ❌            | ✅                | ✅                |
-| `vector_quantize_scan_stream` | `vector_quantize_scan` | ❌            | ✅                | ✅                |
-
-**Examples:**
-
 ```sql
--- Perform a filtered full scan
+-- Streaming mode: progressively scan using quantized data
 SELECT rowid, distance
-FROM vector_full_scan_stream('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'))
-LIMIT 5;
-```
-
-```sql
--- Perform a filtered approximate scan using quantized data
-SELECT rowid, distance
-FROM vector_quantize_scan_stream('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'))
-LIMIT 10;
-```
-
-**Accessing Additional Columns:**
-
-```sql
--- Perform a filtered full scan with additional columns
-SELECT
-    v.rowid,
-    row_number() OVER (ORDER BY v.distance) AS rank_number,
-    v.distance
-FROM vector_full_scan_stream('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]')) AS v
-    JOIN documents ON documents.rowid = v.rowid
-WHERE documents.category = 'science'
+FROM vector_quantize_scan('documents', 'embedding', vector_as_f32('[0.1, 0.2, 0.3]'))
 LIMIT 10;
 ```
 
 **Usage Notes:**
 
-* These interfaces return rows progressively and can efficiently combine vector similarity with SQL-level filters.
-* The `LIMIT` clause can be used to control how many rows are read or returned.
-* The query planner integrates the streaming virtual table into the overall SQL execution plan, enabling hybrid filtering and ranking operations.
+* In **top-k mode** (with `k`), results are sorted by distance. The query planner knows the output is pre-sorted, so no additional `ORDER BY` is needed.
+* In **streaming mode** (without `k`), rows are returned in scan order. Use `ORDER BY distance` and `LIMIT` as needed.
+* Streaming mode is ideal for combining vector similarity with additional SQL-level filters or progressive result consumption.

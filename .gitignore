@@ -44,3 +44,4 @@ packages/node/test-platform-packages/
 # System
 .DS_Store
 Thumbs.db
+CLAUDE.md

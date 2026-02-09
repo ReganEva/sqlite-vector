@@ -14,7 +14,7 @@
 #include <math.h>
 
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
-extern char *distance_backend_name;
+extern const char *distance_backend_name;
 
 // accumulate 32-bit
 #define ACCUMULATE(MUL, ACC)                    \
@@ -185,6 +185,8 @@ float float32_distance_cosine_sse2 (const void *v1, const void *v2, int n) {
     float denom = sqrtf(total_a2 * total_b2);
     if (denom == 0.0f) return 1.0f;
     float cosine_sim = total_dot / denom;
+    if (cosine_sim > 1.0f) cosine_sim = 1.0f;
+    if (cosine_sim < -1.0f) cosine_sim = -1.0f;
     return 1.0f - cosine_sim;
 }
 
@@ -787,6 +789,8 @@ float uint8_distance_cosine_sse2 (const void *v1, const void *v2, int n) {
     float denom = sqrtf((float)total_a2 * (float)total_b2);
     if (denom == 0.0f) return 1.0f; // orthogonal or zero
     float cosine_sim = total_dot / denom;
+    if (cosine_sim > 1.0f) cosine_sim = 1.0f;
+    if (cosine_sim < -1.0f) cosine_sim = -1.0f;
     return 1.0f - cosine_sim; // cosine distance
 }
 
@@ -1003,6 +1007,8 @@ float int8_distance_cosine_sse2 (const void *v1, const void *v2, int n) {
     float denom = sqrtf((float)total_a2 * (float)total_b2);
     if (denom == 0.0f) return 1.0f;
     float cosine_sim = total_dot / denom;
+    if (cosine_sim > 1.0f) cosine_sim = 1.0f;
+    if (cosine_sim < -1.0f) cosine_sim = -1.0f;
     return 1.0f - cosine_sim;
 }
 

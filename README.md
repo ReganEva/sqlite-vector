@@ -74,7 +74,7 @@ INSERT INTO images (embedding, label) VALUES (vector_as_f32('[0.3, 1.0, 0.9, 3.2
 
 -- Initialize the vector. By default, the distance function is L2.
 -- To use a different metric, specify one of the following options:
--- distance=L1, distance=COSINE, distance=DOT, or distance=SQUARED_L2.
+-- distance=L1, distance=COSINE, distance=DOT, distance=SQUARED_L2, or distance=HAMMING.
 SELECT vector_init('images', 'embedding', 'type=FLOAT32,dimension=384');
 
 -- Quantize vector
@@ -87,6 +87,13 @@ SELECT vector_quantize_preload('images', 'embedding');
 SELECT e.id, v.distance FROM images AS e
    JOIN vector_quantize_scan('images', 'embedding', ?, 20) AS v
    ON e.id = v.rowid;
+
+-- Streaming mode: omit k to get rows progressively, use SQL to filter and limit
+SELECT e.id, v.distance FROM images AS e
+   JOIN vector_quantize_scan('images', 'embedding', ?) AS v
+   ON e.id = v.rowid
+   WHERE e.label = 'cat'
+   LIMIT 10;
 ```
 
 ### Swift Package
@@ -117,7 +124,7 @@ sqlite3_close(db)
 Add the [following](https://central.sonatype.com/artifact/ai.sqlite/vector) to your Gradle dependencies:
 
 ```gradle
-implementation 'ai.sqlite:vector:0.9.34'
+implementation 'ai.sqlite:vector:0.9.80'
 ```
 
 Here's an example of how to use the package:

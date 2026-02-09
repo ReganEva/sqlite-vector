@@ -16,7 +16,9 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -42,9 +44,6 @@ char *strcasestr(const char *haystack, const char *needle) {
 }
 #endif
 
-#if defined(_WIN32) || defined(__linux__)
-#include <float.h>
-#endif
 
 #ifdef SQLITE_WASM_EXTRA_INIT
 #define sqlite3_mutex_alloc(_type)                  NULL
@@ -138,6 +137,7 @@ typedef struct {
     vector_options  options;                // options parsed in key=value arguments
     float           scale;                  // computed value by quantization
     float           offset;                 // computed value by quantization
+    bool            binary_mean;            // binary mean option for 1BIT quantization
     
     void            *preloaded;
     int             precounter;
@@ -191,7 +191,7 @@ typedef int (*vcursor_run_callback)(sqlite3 *db, vFullScanCursor *c, const void 
 typedef int (*vcursor_sort_callback)(vFullScanCursor *c);
 
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
-extern char *distance_backend_name;
+extern const char *distance_backend_name;
 
 static sqlite3_mutex *qmutex;
 
@@ -1052,7 +1052,7 @@ bool vector_keyvalue_callback (sqlite3_context *context, void *xdata, const char
     
     // convert value to c-string
     char buffer[256] = {0};
-    size_t len = (value_len > sizeof(buffer)-1) ? sizeof(buffer)-1 : value_len;
+    size_t len = ((size_t)value_len > sizeof(buffer)-1) ? sizeof(buffer)-1 : (size_t)value_len;
     memcpy(buffer, value, len);
     
     if (strncasecmp(key, OPTION_KEY_TYPE, key_len) == 0) {
@@ -1083,7 +1083,7 @@ bool vector_keyvalue_callback (sqlite3_context *context, void *xdata, const char
     
     if (strncasecmp(key, OPTION_KEY_QUANTTYPE, key_len) == 0) {
         vector_qtype type = quant_name_to_type(buffer);
-        if (type == -1) return context_result_error(context, SQLITE_ERROR, "Invalid quantization type: '%s' is not a recognized or supported quantization type", buffer);
+        if ((int)type == -1) return context_result_error(context, SQLITE_ERROR, "Invalid quantization type: '%s' is not a recognized or supported quantization type", buffer);
         options->q_type = type;
         return true;
     }
@@ -1304,13 +1304,8 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
     
     // STEP 1
     // find global min/max across ALL vectors (skip for 1BIT quantization which uses fixed threshold)
-    #if defined(_WIN32) || defined(__linux__)
     float min_val = FLT_MAX;
     float max_val = -FLT_MAX;
-    #else
-    float min_val = MAXFLOAT;
-    float max_val = -MAXFLOAT;
-    #endif
     bool contains_negative = false;
 
     if (qtype != VECTOR_QUANT_1BIT) {
@@ -1323,7 +1318,7 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
             const void *blob = (float *)sqlite3_column_blob(vm, 1);
             if (!blob) continue;
 
-            int blob_size = sqlite3_column_bytes(vm, 1);
+            size_t blob_size = (size_t)sqlite3_column_bytes(vm, 1);
             size_t need_bytes = vector_bytes_for_dim(type, dim);
             if (blob_size < need_bytes) {
                 context_result_error(context, SQLITE_ERROR, "Invalid vector blob found at rowid %lld", (long long)sqlite3_column_int64(vm, 0));
@@ -1414,7 +1409,7 @@ static int vector_rebuild_quantization (sqlite3_context *context, const char *ta
         if (qtype == VECTOR_QUANT_1BIT) {
             // 1-bit quantization: convert source to binary based on type
             switch (type) {
-                case VECTOR_TYPE_F32: quantize_binary((const float *)blob, data, dim, false); break;
+                case VECTOR_TYPE_F32: quantize_binary((const float *)blob, data, dim, t_ctx->binary_mean); break;
                 case VECTOR_TYPE_F16: quantize_binary_f16((const uint16_t *)blob, data, dim, false); break;
                 case VECTOR_TYPE_BF16: quantize_binary_bf16((const uint16_t *)blob, data, dim, false); break;
                 case VECTOR_TYPE_U8: quantize_binary_u8((const uint8_t *)blob, data, dim); break;
@@ -1526,7 +1521,7 @@ static void vector_quantize_preload (sqlite3_context *context, int argc, sqlite3
         uint8_t *data = (uint8_t *)sqlite3_column_blob(vm, 1);
         
         // no check here because I am sure quantization was performed only on non NULL data
-        memcpy(buffer+seek, data, bytes);
+        memcpy((uint8_t *)buffer + seek, data, bytes);
         seek += bytes;
         counter += n;
     }
@@ -1835,7 +1830,7 @@ static void vector_as_type (sqlite3_context *context, vector_type type, int argc
             // Optionally validate against expected dimension if provided
             if (dimension > 0) {
                 size_t expected_size = vector_bytes_for_dim(type, dimension);
-                if (value_size != expected_size) {
+                if ((size_t)value_size != expected_size) {
                     context_result_error(context, SQLITE_ERROR,
                                          "Invalid BLOB size for format '%s': expected %d bytes for %d dimensions (got %d bytes)",
                                          vector_type_to_name(type), (int)expected_size, dimension, value_size);
@@ -1904,22 +1899,22 @@ static void vector_as_bit (sqlite3_context *context, int argc, sqlite3_value **a
 
 // MARK: - Modules -
 static int vFullScanCursorNext (sqlite3_vtab_cursor *cur);
+static int vStreamScanCursorRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1size);
+static int vStreamQuantCursorRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1size);
 
-static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv, const char *fname, vcursor_run_callback run_callback, vcursor_sort_callback sort_callback, bool quantized) {
-    
+static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv, const char *fname, vcursor_run_callback run_callback, vcursor_sort_callback sort_callback, vcursor_run_callback stream_callback, bool quantized) {
+
     vFullScanCursor *c = (vFullScanCursor *)cur;
     vFullScan *vtab = (vFullScan *)cur->pVtab;
-    
-    bool is_streaming = (sort_callback == NULL);
+
+    if (argc != 3 && argc != 4) {
+        return sqlite_vtab_set_error(&vtab->base, "%s expects 3 or 4 arguments, but %d were provided", fname, argc);
+    }
+
+    bool is_streaming = (argc == 3);
     bool is_quantized = quantized;
     c->is_streaming = is_streaming;
     c->is_quantized = is_quantized;
-    
-    // sanity check arguments
-    int nargs = (is_streaming) ? 3 : 4;
-    if (argc != nargs) {
-        return sqlite_vtab_set_error(&vtab->base, "%s expects %d arguments, but %d were provided", fname, nargs, argc);
-    }
     
     // SQLITE_TEXT, SQLITE_TEXT, SQLITE_TEXT or SQLITE_BLOB, SQLITE_INTEGER
     for (int i=0; i<argc; ++i) {
@@ -1973,13 +1968,13 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
     
     c->table = t_ctx;
     if (is_streaming) {
-        int rc = run_callback(vtab->db, c, vector, vsize);
+        int rc = stream_callback(vtab->db, c, vector, vsize);
         if (rc != SQLITE_OK) return rc;
         return vFullScanCursorNext((sqlite3_vtab_cursor *)c);  // Position on first row
     }
-    
+
     // non-streaming flow
-    int k = (is_streaming) ? 0 : sqlite3_value_int(argv[3]);
+    int k = sqlite3_value_int(argv[3]);
     if (k == 0) return SQLITE_DONE;
     
     if (c->row_count != k) {
@@ -2035,11 +2030,9 @@ static int vFullScanDisconnect (sqlite3_vtab *pVtab) {
 }
 
 static int vFullScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) {
-    pIdxInfo->estimatedCost = (double)1;
-    pIdxInfo->estimatedRows = 100;
-    pIdxInfo->orderByConsumed = 1;
-    pIdxInfo->idxNum = 1;
-    
+    bool has_k = false;
+    int k_index = -1;
+
     const struct sqlite3_index_constraint *pConstraint = pIdxInfo->aConstraint;
     for(int i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){
         if( pConstraint->usable == 0 ) continue;
@@ -2054,8 +2047,8 @@ static int vFullScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) 
                 pIdxInfo->aConstraintUsage[i].omit = 1;
                 break;
             case VECTOR_COLUMN_K:
-                pIdxInfo->aConstraintUsage[i].argvIndex = 3;
-                pIdxInfo->aConstraintUsage[i].omit = 1;
+                has_k = true;
+                k_index = i;
                 break;
             case VECTOR_COLUMN_MEMIDX:
                 pIdxInfo->aConstraintUsage[i].argvIndex = 4;
@@ -2063,6 +2056,22 @@ static int vFullScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) 
                 break;
         }
     }
+
+    if (has_k) {
+        // top-k mode
+        pIdxInfo->aConstraintUsage[k_index].argvIndex = 3;
+        pIdxInfo->aConstraintUsage[k_index].omit = 1;
+        pIdxInfo->estimatedCost = (double)1;
+        pIdxInfo->estimatedRows = 100;
+        pIdxInfo->orderByConsumed = 1;
+        pIdxInfo->idxNum = 1;
+    } else {
+        // streaming mode
+        pIdxInfo->estimatedCost = 1e8;
+        pIdxInfo->estimatedRows = 100000;
+        pIdxInfo->idxNum = 2;
+    }
+
     return SQLITE_OK;
 }
 
@@ -2102,6 +2111,7 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
         // For BIT type, use byte count instead of dimension
         vector_type vt = c->table->options.v_type;
         int dist_size = (vt == VECTOR_TYPE_BIT) ? ((dimension + 7) / 8) : dimension;
+        size_t expected_bytes = vector_bytes_for_dim(vt, dimension);
         while (1) {
             int rc = sqlite3_step(vm);
             if (rc == SQLITE_DONE) { c->stream.is_eof = 1; return SQLITE_OK; }
@@ -2112,6 +2122,9 @@ static int vFullScanCursorNext (sqlite3_vtab_cursor *cur){
 
             const float *v2 = (const float *)sqlite3_column_blob(vm, 1);
             if (v2 == NULL) continue;
+
+            // skip undersized blobs
+            if ((size_t)sqlite3_column_bytes(vm, 1) < expected_bytes) continue;
 
             float distance = distance_fn((const void *)v1, (const void *)v2, dist_size);
             if (nearly_zero_float32(distance)) distance = 0.0f;
@@ -2278,6 +2291,8 @@ static int vFullScanRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1
     distance_function_t distance_fn = dispatch_distance_table[vd][vt];
     int dist_size = (vt == VECTOR_TYPE_BIT) ? ((dimension + 7) / 8) : dimension;
 
+    size_t expected_bytes = vector_bytes_for_dim(vt, dimension);
+
     while (1) {
         rc = sqlite3_step(vm);
         if (rc == SQLITE_DONE) {rc = SQLITE_OK; goto cleanup;}
@@ -2286,6 +2301,7 @@ static int vFullScanRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1
 
         float *v2 = (float *)sqlite3_column_blob(vm, 1);
         if (v2 == NULL) continue;
+        if ((size_t)sqlite3_column_bytes(vm, 1) < expected_bytes) continue;
 
         float distance = distance_fn((const void *)v1, (const void *)v2, dist_size);
         if (nearly_zero_float32(distance)) distance = 0.0;
@@ -2305,7 +2321,7 @@ cleanup:
 }
 
 static int vFullScanCursorFilter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
-    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_full_scan", vFullScanRun, vFullScanSortSlots, false);
+    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_full_scan", vFullScanRun, vFullScanSortSlots, vStreamScanCursorRun, false);
 }
 
 // MARK: -
@@ -2368,7 +2384,7 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
     if (qtype == VECTOR_QUANT_1BIT) {
         // 1-bit quantization: convert source to binary based on type
         switch (type) {
-            case VECTOR_TYPE_F32: quantize_binary((const float *)v1, v, dimension, false); break;
+            case VECTOR_TYPE_F32: quantize_binary((const float *)v1, v, dimension, c->table->binary_mean); break;
             case VECTOR_TYPE_F16: quantize_binary_f16((const uint16_t *)v1, v, dimension, false); break;
             case VECTOR_TYPE_BF16: quantize_binary_bf16((const uint16_t *)v1, v, dimension, false); break;
             case VECTOR_TYPE_U8: quantize_binary_u8((const uint8_t *)v1, v, dimension); break;
@@ -2401,7 +2417,7 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
     generate_select_quant_table(c->table->t_name, c->table->c_name, sql);
     sqlite3_stmt *vm = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &vm, NULL);
-    if (rc != SQLITE_OK) goto kann_run_cleanup;
+    if (rc != SQLITE_OK) goto vquant_run_cleanup;
     
     // precompute constants
     const size_t rowid_size = sizeof(int64_t);
@@ -2421,7 +2437,7 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
     while (1) {
         rc = sqlite3_step(vm);
         if (rc == SQLITE_DONE) {rc = SQLITE_OK; break;} // return error: rebuild must be call (only if first time run)
-        else if (rc != SQLITE_ROW) goto kann_run_cleanup;
+        else if (rc != SQLITE_ROW) goto vquant_run_cleanup;
         
         int counter = sqlite3_column_int(vm, 0);
         uint8_t *data = (uint8_t *)sqlite3_column_blob(vm, 1);
@@ -2447,7 +2463,7 @@ static int vQuantRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1siz
     
     rc = SQLITE_OK;
     
-kann_run_cleanup:
+vquant_run_cleanup:
     if (rc != SQLITE_OK) printf("Error in vector_rebuild_quantization: %s\n", sqlite3_errmsg(db));
     if (vm) sqlite3_finalize(vm);
     if (v) sqlite3_free(v);
@@ -2456,41 +2472,7 @@ kann_run_cleanup:
 
 
 static int vQuantCursorFilter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
-    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_quantize_scan", vQuantRun, vFullScanSortSlots, true);
-}
-
-// MARK: - Streaming Modules -
-
-static int vStreamScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) {
-    // Do NOT set p->orderByConsumed; we can’t guarantee order.
-    // Optionally: if ORDER BY distance is present, bump cost/rows a bit.
-    pIdxInfo->estimatedCost = 1e8;
-    pIdxInfo->estimatedRows = 100000;
-    
-    const struct sqlite3_index_constraint *pConstraint = pIdxInfo->aConstraint;
-    for(int i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){
-        if( pConstraint->usable == 0 ) continue;
-        if( pConstraint->op != SQLITE_INDEX_CONSTRAINT_EQ ) continue;
-        switch( pConstraint->iColumn ){
-            case VECTOR_COLUMN_IDX:
-                pIdxInfo->aConstraintUsage[i].argvIndex = 1;
-                pIdxInfo->aConstraintUsage[i].omit = 1;
-                break;
-            case VECTOR_COLUMN_VECTOR:
-                pIdxInfo->aConstraintUsage[i].argvIndex = 2;
-                pIdxInfo->aConstraintUsage[i].omit = 1;
-                break;
-            case VECTOR_COLUMN_K:
-                pIdxInfo->aConstraintUsage[i].argvIndex = 3;
-                pIdxInfo->aConstraintUsage[i].omit = 1;
-                break;
-            case VECTOR_COLUMN_MEMIDX:
-                pIdxInfo->aConstraintUsage[i].argvIndex = 4;
-                pIdxInfo->aConstraintUsage[i].omit = 1;
-                break;
-        }
-    }
-    return SQLITE_OK;
+    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_quantize_scan", vQuantRun, vFullScanSortSlots, vStreamQuantCursorRun, true);
 }
 
 static int vStreamScanCursorRun (sqlite3 *db, vFullScanCursor *c, const void *v1, int v1size) {
@@ -2604,14 +2586,6 @@ cleanup:
     return rc;
 }
 
-static int vStreamScanCursorFilter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
-    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_full_scan_stream", vStreamScanCursorRun, NULL, false);
-}
-
-static int vStreamQuantCursorFilter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
-    return vCursorFilterCommon(cur, idxNum, idxStr, argc, argv, "vector_quantize_scan_stream", vStreamQuantCursorRun, NULL, true);
-}
-
 // ---------------------------
 
 static sqlite3_module vFullScanModule = {
@@ -2652,62 +2626,6 @@ static sqlite3_module vQuantScanModule = {
   /* xOpen       */ vFullScanCursorOpen,
   /* xClose      */ vFullScanCursorClose,
   /* xFilter     */ vQuantCursorFilter,
-  /* xNext       */ vFullScanCursorNext,
-  /* xEof        */ vFullScanCursorEof,
-  /* xColumn     */ vFullScanCursorColumn,
-  /* xRowid      */ vFullScanCursorRowid,
-  /* xUpdate     */ 0,
-  /* xBegin      */ 0,
-  /* xSync       */ 0,
-  /* xCommit     */ 0,
-  /* xRollback   */ 0,
-  /* xFindMethod */ 0,
-  /* xRename     */ 0,
-  /* xSavepoint  */ 0,
-  /* xRelease    */ 0,
-  /* xRollbackTo */ 0,
-  /* xShadowName */ 0,
-  /* xIntegrity  */ 0
-};
-
-static sqlite3_module vFullScanStreamModule = {
-  /* iVersion    */ 0,
-  /* xCreate     */ 0,
-  /* xConnect    */ vFullScanConnect,
-  /* xBestIndex  */ vStreamScanBestIndex,
-  /* xDisconnect */ vFullScanDisconnect,
-  /* xDestroy    */ 0,
-  /* xOpen       */ vFullScanCursorOpen,
-  /* xClose      */ vFullScanCursorClose,
-  /* xFilter     */ vStreamScanCursorFilter,
-  /* xNext       */ vFullScanCursorNext,
-  /* xEof        */ vFullScanCursorEof,
-  /* xColumn     */ vFullScanCursorColumn,
-  /* xRowid      */ vFullScanCursorRowid,
-  /* xUpdate     */ 0,
-  /* xBegin      */ 0,
-  /* xSync       */ 0,
-  /* xCommit     */ 0,
-  /* xRollback   */ 0,
-  /* xFindMethod */ 0,
-  /* xRename     */ 0,
-  /* xSavepoint  */ 0,
-  /* xRelease    */ 0,
-  /* xRollbackTo */ 0,
-  /* xShadowName */ 0,
-  /* xIntegrity  */ 0
-};
-
-static sqlite3_module vQuantScanStreamModule = {
-  /* iVersion    */ 0,
-  /* xCreate     */ 0,
-  /* xConnect    */ vFullScanConnect,
-  /* xBestIndex  */ vStreamScanBestIndex,
-  /* xDisconnect */ vFullScanDisconnect,
-  /* xDestroy    */ 0,
-  /* xOpen       */ vFullScanCursorOpen,
-  /* xClose      */ vFullScanCursorClose,
-  /* xFilter     */ vStreamQuantCursorFilter,
   /* xNext       */ vFullScanCursorNext,
   /* xEof        */ vFullScanCursorEof,
   /* xColumn     */ vFullScanCursorColumn,
@@ -2885,11 +2803,11 @@ SQLITE_VECTOR_API int sqlite3_vector_init (sqlite3 *db, char **pzErrMsg, const s
     
     rc = sqlite3_create_module(db, "vector_quantize_scan", &vQuantScanModule, ctx);
     if (rc != SQLITE_OK) goto cleanup;
-    
-    rc = sqlite3_create_module(db, "vector_full_scan_stream", &vFullScanStreamModule, ctx);
+
+    // backward-compat aliases: _stream modules merged into main modules in 0.9.80
+    rc = sqlite3_create_module(db, "vector_full_scan_stream", &vFullScanModule, ctx);
     if (rc != SQLITE_OK) goto cleanup;
-    
-    rc = sqlite3_create_module(db, "vector_quantize_scan_stream", &vQuantScanStreamModule, ctx);
+    rc = sqlite3_create_module(db, "vector_quantize_scan_stream", &vQuantScanModule, ctx);
     if (rc != SQLITE_OK) goto cleanup;
 
     return SQLITE_OK;

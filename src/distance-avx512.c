@@ -15,7 +15,7 @@
 #include <math.h>
 
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
-extern char* distance_backend_name;
+extern const char *distance_backend_name;
 
 // Abs for f32 (AVX512F has native abs)
 #define _mm512_abs_ps(x) _mm512_abs_ps(x)
@@ -159,6 +159,8 @@ float float32_distance_cosine_avx512(const void* a, const void* b, int n) {
     if (norm_a == 0.0f || norm_b == 0.0f) return 1.0f;
 
     float cosine_similarity = dot / (norm_a * norm_b);
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
 
@@ -712,6 +714,8 @@ float uint8_distance_cosine_avx512(const void* a, const void* b, int n) {
     if (norm_a == 0.0f || norm_b == 0.0f) return 1.0f;
 
     float cosine_similarity = dot / (norm_a * norm_b);
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
 
@@ -843,6 +847,8 @@ float int8_distance_cosine_avx512(const void* a, const void* b, int n) {
     if (norm_a == 0.0f || norm_b == 0.0f) return 1.0f;
 
     float cosine_similarity = dot / (norm_a * norm_b);
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
 

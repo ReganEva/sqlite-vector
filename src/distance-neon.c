@@ -21,7 +21,7 @@
 #include <arm_neon.h>
 
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
-extern char *distance_backend_name;
+extern const char *distance_backend_name;
 
 // Helper function for 32-bit ARM: vmaxv_u16 is not available in ARMv7 NEON
 #ifdef _ARM32BIT_
@@ -110,7 +110,10 @@ float float32_distance_cosine_neon (const void *v1, const void *v2, int n) {
     }
 
     if (norm_a == 0.0f || norm_b == 0.0f) return 1.0f;
-    return 1.0f - (dot / (sqrtf(norm_a) * sqrtf(norm_b)));
+    float cosine_similarity = dot / (sqrtf(norm_a) * sqrtf(norm_b));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float float32_distance_dot_neon (const void *v1, const void *v2, int n) {
@@ -333,7 +336,10 @@ float bfloat16_distance_cosine_neon (const void *v1, const void *v2, int n) {
     }
 
     if (norm_a == 0.0f || norm_b == 0.0f) return 1.0f;
-    return 1.0f - (dot / (sqrtf(norm_a) * sqrtf(norm_b)));
+    float cosine_similarity = dot / (sqrtf(norm_a) * sqrtf(norm_b));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float bfloat16_distance_dot_neon (const void *v1, const void *v2, int n) {
@@ -943,7 +949,10 @@ float uint8_distance_cosine_neon (const void *v1, const void *v2, int n) {
     }
     
     if (norm_a == 0 || norm_b == 0) return 1.0f;
-    return 1.0f - (dot / (sqrtf((float)norm_a) * sqrtf((float)norm_b)));
+    float cosine_similarity = dot / (sqrtf((float)norm_a) * sqrtf((float)norm_b));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float uint8_distance_dot_neon (const void *v1, const void *v2, int n) {
@@ -993,33 +1002,30 @@ float uint8_distance_dot_neon (const void *v1, const void *v2, int n) {
 float uint8_distance_l1_neon (const void *v1, const void *v2, int n) {
     const uint8_t *a = (const uint8_t *)v1;
     const uint8_t *b = (const uint8_t *)v2;
-    
-    uint16x8_t sum_acc_lo = vdupq_n_u16(0);
-    uint16x8_t sum_acc_hi = vdupq_n_u16(0);
+
+    uint32x4_t sum_acc = vdupq_n_u32(0);
     int i = 0;
-    
+
     for (; i <= n - 16; i += 16) {
         uint8x16_t va = vld1q_u8(a + i);
         uint8x16_t vb = vld1q_u8(b + i);
-        
+
         // Compute absolute difference
         uint8x16_t abs_diff = vabdq_u8(va, vb);
-        
-        // Split and widen to 16-bit
+
+        // Widen to 16-bit then accumulate into 32-bit
         uint16x8_t abs_lo = vmovl_u8(vget_low_u8(abs_diff));
         uint16x8_t abs_hi = vmovl_u8(vget_high_u8(abs_diff));
-        
-        sum_acc_lo = vaddq_u16(sum_acc_lo, abs_lo);
-        sum_acc_hi = vaddq_u16(sum_acc_hi, abs_hi);
+
+        sum_acc = vaddq_u32(sum_acc, vmovl_u16(vget_low_u16(abs_lo)));
+        sum_acc = vaddq_u32(sum_acc, vmovl_u16(vget_high_u16(abs_lo)));
+        sum_acc = vaddq_u32(sum_acc, vmovl_u16(vget_low_u16(abs_hi)));
+        sum_acc = vaddq_u32(sum_acc, vmovl_u16(vget_high_u16(abs_hi)));
     }
-    
-    // Combine 16-bit accumulators
-    uint16x8_t total_acc = vaddq_u16(sum_acc_lo, sum_acc_hi);
-    
+
     // Horizontal sum
-    uint16_t tmp[8];
-    vst1q_u16(tmp, total_acc);
-    uint32_t total = tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+    uint64x2_t sum64 = vpaddlq_u32(sum_acc);
+    uint32_t total = (uint32_t)(vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1));
     
     // Tail loop
     for (; i < n; ++i) {
@@ -1153,7 +1159,10 @@ float int8_distance_cosine_neon (const void *v1, const void *v2, int n) {
     }
 
     if (norm_a == 0 || norm_b == 0) return 1.0f;
-    return 1.0f - (dot / (sqrtf((float)norm_a) * sqrtf((float)norm_b)));
+    float cosine_similarity = dot / (sqrtf((float)norm_a) * sqrtf((float)norm_b));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float int8_distance_dot_neon (const void *v1, const void *v2, int n) {

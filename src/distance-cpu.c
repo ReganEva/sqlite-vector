@@ -18,7 +18,7 @@
 #include "distance-avx2.h"
 #include "distance-avx512.h"
 
-char *distance_backend_name = "CPU";
+const char *distance_backend_name = "CPU";
 distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX] = {0};
 
 #define LASSQ_UPDATE(ad_) do {                            \
@@ -106,8 +106,11 @@ float float32_distance_cosine_cpu (const void *v1, const void *v2, int n) {
     if (norm_x == 0.0f || norm_y == 0.0f) {
         return 1.0f;
     }
-    
-    return 1.0f - (dot / (sqrtf(norm_x) * sqrtf(norm_y)));
+
+    float cosine_similarity = dot / (sqrtf(norm_x) * sqrtf(norm_y));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float float32_distance_dot_cpu (const void *v1, const void *v2, int n) {
@@ -250,7 +253,10 @@ float bfloat16_distance_cosine_cpu(const void *v1, const void *v2, int n) {
         return 1.0f;
     }
 
-    return 1.0f - (dot / (sqrtf(norm_x) * sqrtf(norm_y)));
+    float cosine_similarity = dot / (sqrtf(norm_x) * sqrtf(norm_y));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 float bfloat16_distance_dot_cpu (const void *v1, const void *v2, int n) {
@@ -536,6 +542,8 @@ float uint8_distance_cosine_cpu (const void *v1, const void *v2, int n) {
     }
 
     float cosine_similarity = dot / (sqrtf((float)norm_a2) * sqrtf((float)norm_b2));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
 
@@ -648,6 +656,8 @@ float int8_distance_cosine_cpu (const void *v1, const void *v2, int n) {
     }
 
     float cosine_similarity = dot / (sqrtf((float)norm_a2) * sqrtf((float)norm_b2));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
 
@@ -716,8 +726,9 @@ float bit1_distance_hamming_cpu (const void *v1, const void *v2, int n) {
     
     // process 8 bytes at a time
     for (; i + 8 <= n; i += 8) {
-        uint64_t xa = *(const uint64_t *)(a + i);
-        uint64_t xb = *(const uint64_t *)(b + i);
+        uint64_t xa, xb;
+        memcpy(&xa, a + i, sizeof(uint64_t));
+        memcpy(&xb, b + i, sizeof(uint64_t));
         distance += popcount64(xa ^ xb);
     }
     
