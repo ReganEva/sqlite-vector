@@ -45,3 +45,7 @@ packages/node/test-platform-packages/
 .DS_Store
 Thumbs.db
 CLAUDE.md
+
+# Dart/Flutter
+.dart_tool/
+pubspec.lock

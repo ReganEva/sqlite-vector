@@ -1,0 +1,11 @@
+name: sqlite_vector_example
+description: Example app demonstrating sqlite_vector usage.
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  sqlite3: ^3.0.0
+  sqlite_vector:
+    path: ../../packages/flutter

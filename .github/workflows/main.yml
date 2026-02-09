@@ -392,12 +392,55 @@ jobs:
           echo "   Platform packages: 7"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+      - name: assemble flutter package
+        if: steps.tag.outputs.version != ''
+        run: |
+          VERSION=${{ steps.tag.outputs.version }}
+          FLUTTER_DIR=packages/flutter
+
+          # Android
+          mkdir -p $FLUTTER_DIR/native_libraries/android
+          cp artifacts/vector-android-arm64-v8a/vector.so  $FLUTTER_DIR/native_libraries/android/vector_android_arm64.so
+          cp artifacts/vector-android-armeabi-v7a/vector.so $FLUTTER_DIR/native_libraries/android/vector_android_arm.so
+          cp artifacts/vector-android-x86_64/vector.so     $FLUTTER_DIR/native_libraries/android/vector_android_x64.so
+
+          # iOS device
+          mkdir -p $FLUTTER_DIR/native_libraries/ios
+          cp artifacts/vector-ios/vector.dylib $FLUTTER_DIR/native_libraries/ios/vector_ios_arm64.dylib
+
+          # iOS simulator (keep universal/fat binary as-is)
+          mkdir -p $FLUTTER_DIR/native_libraries/ios-sim
+          cp artifacts/vector-ios-sim/vector.dylib $FLUTTER_DIR/native_libraries/ios-sim/vector_ios-sim.dylib
+
+          # macOS (separate arch-specific dylibs)
+          mkdir -p $FLUTTER_DIR/native_libraries/mac
+          cp artifacts/vector-macos-arm64/vector.dylib $FLUTTER_DIR/native_libraries/mac/vector_mac_arm64.dylib
+          cp artifacts/vector-macos-x86_64/vector.dylib $FLUTTER_DIR/native_libraries/mac/vector_mac_x64.dylib
+
+          # Linux
+          mkdir -p $FLUTTER_DIR/native_libraries/linux
+          cp artifacts/vector-linux-x86_64/vector.so $FLUTTER_DIR/native_libraries/linux/vector_linux_x64.so
+          cp artifacts/vector-linux-arm64/vector.so  $FLUTTER_DIR/native_libraries/linux/vector_linux_arm64.so
+
+          # Windows
+          mkdir -p $FLUTTER_DIR/native_libraries/windows
+          cp artifacts/vector-windows-x86_64/vector.dll $FLUTTER_DIR/native_libraries/windows/vector_windows_x64.dll
+
+          # Update version
+          sed -i "s/^version: .*/version: $VERSION/" $FLUTTER_DIR/pubspec.yaml
+
+          # Publish (commented out until pub.dev OIDC is configured)
+          # cd $FLUTTER_DIR
+          # dart pub publish --dry-run
+          # dart pub publish --force
+
       - uses: softprops/action-gh-release@v2.2.1
         if: steps.tag.outputs.version != ''
         with:
           body: |
             # Packages
 
+            [**Flutter/Dart**](https://pub.dev/packages/sqlite_vector): `dart pub add sqlite_vector`
             [**Node**](https://www.npmjs.com/package/@sqliteai/sqlite-vector): `npm install @sqliteai/sqlite-vector`
             [**WASM**](https://www.npmjs.com/package/@sqliteai/sqlite-wasm): `npm install @sqliteai/sqlite-wasm`
             [**Android**](https://central.sonatype.com/artifact/ai.sqlite/vector): `ai.sqlite:vector:${{ steps.tag.outputs.version }}`

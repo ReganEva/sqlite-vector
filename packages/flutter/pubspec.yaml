@@ -1,0 +1,21 @@
+name: sqlite_vector
+version: 0.9.70
+description: >
+  SQLite Vector extension for Flutter/Dart. Provides vector search with
+  SIMD-optimized distance functions (L2, cosine, dot product) for
+  Float32, Float16, Int8, 1Bit vectors.
+homepage: https://github.com/sqliteai/sqlite-vector
+repository: https://github.com/sqliteai/sqlite-vector
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  code_assets: ^1.0.0
+  hooks: ^1.0.0
+  path: ^1.8.0
+  sqlite3: ^3.0.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.24.0
