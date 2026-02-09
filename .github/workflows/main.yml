@@ -429,10 +429,10 @@ jobs:
           # Update version
           sed -i "s/^version: .*/version: $VERSION/" $FLUTTER_DIR/pubspec.yaml
 
-          # Publish (commented out until pub.dev OIDC is configured)
-          # cd $FLUTTER_DIR
-          # dart pub publish --dry-run
-          # dart pub publish --force
+          # Publish to pub.dev
+          cd $FLUTTER_DIR
+          dart pub publish --dry-run
+          dart pub publish --force
 
       - uses: softprops/action-gh-release@v2.2.1
         if: steps.tag.outputs.version != ''

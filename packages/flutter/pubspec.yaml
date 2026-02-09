@@ -1,5 +1,5 @@
 name: sqlite_vector
-version: 0.9.70
+version: 0.9.81
 description: >
   SQLite Vector extension for Flutter/Dart. Provides vector search with
   SIMD-optimized distance functions (L2, cosine, dot product) for
