@@ -128,6 +128,11 @@ $(BUILD_DIR)/%.o: %.c
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/vector" "SELECT vector_version();"
 
+TEST_SRC = test/test_vector.c libs/sqlite3.c $(SRC_FILES)
+unittest:
+	$(CC) $(CFLAGS) -DSQLITE_CORE -O2 $(TEST_SRC) -o $(BUILD_DIR)/test_vector -lm -lpthread
+	./$(BUILD_DIR)/test_vector
+
 # Clean up generated files
 clean:
 	rm -rf $(BUILD_DIR)/* $(DIST_DIR)/* *.gcda *.gcno *.gcov *.sqlite
@@ -229,4 +234,4 @@ help:
 	@echo "  xcframework	- Build the Apple XCFramework"
 	@echo "  aar			- Build the Android AAR package"
 
-.PHONY: all clean test extension help version xcframework aar
+.PHONY: all clean test unittest extension help version xcframework aar
