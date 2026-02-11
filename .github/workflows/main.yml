@@ -400,7 +400,7 @@ jobs:
           body: |
             # Packages
 
-            [**Flutter/Dart**](https://pub.dev/packages/sqlite_vector): `dart pub add sqlite_vector`
+            [**Flutter/Dart**](https://pub.dev/packages/sqlite_vector): `flutter pub add sqlite_vector:${{ steps.tag.outputs.version }}` or `dart pub add sqlite_vector:${{ steps.tag.outputs.version }}`
             [**Node**](https://www.npmjs.com/package/@sqliteai/sqlite-vector): `npm install @sqliteai/sqlite-vector`
             [**WASM**](https://www.npmjs.com/package/@sqliteai/sqlite-wasm): `npm install @sqliteai/sqlite-wasm`
             [**Android**](https://central.sonatype.com/artifact/ai.sqlite/vector): `ai.sqlite:vector:${{ steps.tag.outputs.version }}`

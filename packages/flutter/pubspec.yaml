@@ -1,5 +1,5 @@
 name: sqlite_vector
-version: 0.9.83
+version: 0.9.84
 description: >
   SQLite Vector is a cross-platform, ultra-efficient SQLite extension that
   brings vector search capabilities to your embedded database. It works

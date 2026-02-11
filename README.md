@@ -152,6 +152,27 @@ pip install sqliteai-vector
 
 For usage details and examples, see the [Python package documentation](./packages/python/README.md).
 
+### Flutter Package
+
+Add the [sqlite_vector](https://pub.dev/packages/sqlite_vector) package to your project:
+
+```bash
+flutter pub add sqlite_vector  # Flutter projects
+dart pub add sqlite_vector     # Dart projects
+```
+
+Usage with `sqlite3` package:
+```dart
+import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite_vector/sqlite_vector.dart';
+
+sqlite3.loadSqliteVectorExtension();
+final db = sqlite3.openInMemory();
+print(db.select('SELECT vector_version()'));
+```
+
+For a complete example, see the [Flutter example](https://github.com/sqliteai/sqlite-extensions-guide/blob/main/examples/flutter/README.md).
+
 ## Documentation
 
 Extensive API documentation can be found in the [API page](https://github.com/sqliteai/sqlite-vector/blob/main/API.md).
