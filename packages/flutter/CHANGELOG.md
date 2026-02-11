@@ -1,4 +1,4 @@
-## 0.9.84
+## 0.9.85
 
 - Initial release.
 - Bundles pre-built sqlite-vector binaries for Android, iOS, macOS, Linux, and Windows.
