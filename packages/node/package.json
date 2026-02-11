@@ -44,12 +44,12 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sqliteai/sqlite-vector.git",
+    "url": "git+https://github.com/sqliteai/sqlite-vector.git",
     "directory": "packages/node"
   },
   "homepage": "https://github.com/sqliteai/sqlite-vector#readme",
   "bugs": {
-    "url": "https://github.com/sqliteai/sqlite-vector/issues"
+    "url": "git+https://github.com/sqliteai/sqlite-vector/issues"
   },
   "engines": {
     "node": ">=16.0.0"

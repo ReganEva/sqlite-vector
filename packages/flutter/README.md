@@ -1,6 +1,6 @@
 # sqlite_vector
 
-SQLite Vector extension for Flutter/Dart. Provides vector search with SIMD-optimized distance functions (L2, cosine, dot product) for Float32, Float16, Int8, and 1Bit vectors.
+SQLite Vector is a cross-platform, ultra-efficient SQLite extension that brings vector search capabilities to your embedded database. It works seamlessly on iOS, Android, Windows, Linux, and macOS, using just 30MB of memory by default. With support for Float32, Float16, BFloat16, Int8, UInt8 and 1Bit, and highly optimized distance functions, it's the ideal solution for Edge AI applications.
 
 ## Installation
 
