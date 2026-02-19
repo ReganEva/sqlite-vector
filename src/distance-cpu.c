@@ -844,7 +844,7 @@ float bit1_distance_hamming_cpu (const void *v1, const void *v2, int n) {
         #include <sys/auxv.h>
         #include <asm/hwcap.h>
         bool cpu_supports_neon (void) {
-            #ifdef AT_HWCAP
+            #if defined(AT_HWCAP) && defined(HWCAP_NEON)
             return (getauxval(AT_HWCAP) & HWCAP_NEON) != 0;
             #else
             return false;
