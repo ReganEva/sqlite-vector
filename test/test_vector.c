@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <math.h>
 #include "sqlite3.h"
 #include "sqlite-vector.h"
 
@@ -73,6 +74,7 @@ static int setup_table(sqlite3 *db, const char *tbl, const char *type,
 
 typedef struct {
     int    count;
+    int    ids[64];
     double distances[64];
 } scan_result;
 
@@ -80,6 +82,7 @@ static int scan_cb(void *ctx, int ncols, char **vals, char **names) {
     (void)names;
     scan_result *r = (scan_result *)ctx;
     if (r->count < 64 && ncols >= 2 && vals[1]) {
+        r->ids[r->count] = vals[0] ? atoi(vals[0]) : 0;
         r->distances[r->count] = atof(vals[1]);
     }
     r->count++;
@@ -311,6 +314,321 @@ static const char *bit_vecs[] = {
 static const int bit_nvecs = 10;
 static const char *bit_query = "[1, 0, 1, 0, 1, 0, 1, 0]";
 
+/* ---------- Test: distance function values ---------- */
+
+typedef struct {
+    const char *distance_name;
+    double eps_f32;
+    double eps_f16;
+    double eps_bf16;
+    double expected[10];
+} expected_distance_case;
+
+static const char *distance_vecs[] = {
+    "[1.0, 2.0, 0.0, -1.0]",
+    "[0.5, -1.5, 2.0, 1.0]",
+    "[-2.0, 0.0, 1.0, 0.5]",
+    "[3.0, 1.0, -1.0, 2.0]",
+    "[-0.5, 2.5, 1.5, -2.0]",
+    "[1.5, 1.5, 1.5, 1.5]",
+    "[-1.0, -2.0, 0.5, 3.0]",
+    "[2.0, -0.5, -2.5, 0.0]",
+    "[0.0, 3.0, -1.0, -1.5]",
+    "[-1.5, 0.5, 2.5, -0.5]"
+};
+static const int distance_nvecs = 10;
+static const char *distance_query = "[0.75, -0.25, 1.25, -0.75]";
+static const char *distance_int_vecs[] = {
+    "[10, 2, 0, 7]",
+    "[3, 14, 9, 1]",
+    "[20, 5, 4, 12]",
+    "[8, 8, 8, 8]",
+    "[1, 0, 15, 6]",
+    "[12, 18, 2, 4]",
+    "[6, 3, 11, 19]",
+    "[16, 7, 13, 5]",
+    "[4, 20, 1, 10]",
+    "[9, 11, 6, 14]"
+};
+static const int distance_int_nvecs = 10;
+static const char *distance_int_query = "[7, 9, 5, 11]";
+
+static double eps_for_type(const expected_distance_case *tc, const char *vtype) {
+    if (strcasecmp(vtype, "f16") == 0) return tc->eps_f16;
+    if (strcasecmp(vtype, "bf16") == 0) return tc->eps_bf16;
+    return tc->eps_f32;
+}
+
+static void test_one_distance_case(sqlite3 *db, const char *vtype, const expected_distance_case *tc) {
+    char tbl[64];
+    char sql[1024];
+    char msg[256];
+    double eps = eps_for_type(tc, vtype);
+
+    snprintf(tbl, sizeof(tbl), "tdist_%s_%s", tc->distance_name, vtype);
+    for (char *p = tbl; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
+
+    if (setup_table(db, tbl, vtype, tc->distance_name, 4, distance_vecs, distance_nvecs) != 0) {
+        snprintf(msg, sizeof(msg), "%s/%s distance setup", vtype, tc->distance_name);
+        ASSERT(0, msg);
+        return;
+    }
+
+    scan_result r = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT id, distance FROM vector_full_scan('%s', 'v', vector_as_%s('%s')) ORDER BY id;",
+             tbl, vtype, distance_query);
+    char *err = NULL;
+    int rc = sqlite3_exec(db, sql, scan_cb, &r, &err);
+    snprintf(msg, sizeof(msg), "%s/%s distance query executes", vtype, tc->distance_name);
+    ASSERT(rc == SQLITE_OK, msg);
+    if (err) { printf("  err: %s\n", err); sqlite3_free(err); }
+    if (rc != SQLITE_OK) return;
+
+    snprintf(msg, sizeof(msg), "%s/%s distance query returns all rows", vtype, tc->distance_name);
+    ASSERT(r.count == distance_nvecs, msg);
+    if (r.count != distance_nvecs) return;
+
+    for (int i = 0; i < distance_nvecs; i++) {
+        int id_ok = (r.ids[i] == (i + 1));
+        snprintf(msg, sizeof(msg), "%s/%s row id matches expected (row %d)",
+                 vtype, tc->distance_name, i + 1);
+        ASSERT(id_ok, msg);
+
+        double diff = fabs(r.distances[i] - tc->expected[i]);
+        int within_eps = diff <= eps;
+        snprintf(msg, sizeof(msg), "%s/%s distance within epsilon (id=%d, diff=%.8g, eps=%.3g)",
+                 vtype, tc->distance_name, i + 1, diff, eps);
+        ASSERT(within_eps, msg);
+    }
+}
+
+static void test_distance_functions_float(sqlite3 *db) {
+    const expected_distance_case cases[] = {
+        {
+            .distance_name = "L2",
+            .eps_f32 = 1e-6,
+            .eps_f16 = 1e-2,
+            .eps_bf16 = 5e-2,
+            .expected = {
+                2.598076211353316,
+                2.291287847477920,
+                3.041381265149110,
+                4.387482193696061,
+                3.278719262151000,
+                2.958039891549808,
+                4.555216789572150,
+                4.031128874149275,
+                4.092676385936225,
+                2.692582403567252
+            }
+        },
+        {
+            .distance_name = "SQUARED_L2",
+            .eps_f32 = 1e-6,
+            .eps_f16 = 5e-2,
+            .eps_bf16 = 2e-1,
+            .expected = {6.75, 5.25, 9.25, 19.25, 10.75, 8.75, 20.75, 16.25, 16.75, 7.25}
+        },
+        {
+            .distance_name = "COSINE",
+            .eps_f32 = 1e-5,
+            .eps_f16 = 1e-2,
+            .eps_bf16 = 5e-2,
+            .expected = {
+                0.753817018041334,
+                0.449518117436820,
+                1.164487923739942,
+                1.116774841624228,
+                0.598909685625288,
+                0.698488655422236,
+                1.299521148936577,
+                1.279145263119541,
+                1.150755672288882,
+                0.547732983133355
+            }
+        },
+        {
+            .distance_name = "DOT",
+            .eps_f32 = 1e-6,
+            .eps_f16 = 1e-2,
+            .eps_bf16 = 5e-2,
+            .expected = {-1.0, -2.5, 0.625, 0.75, -2.375, -1.5, 1.875, 1.5, 0.875, -2.25}
+        },
+        {
+            .distance_name = "L1",
+            .eps_f32 = 1e-6,
+            .eps_f16 = 1e-2,
+            .eps_bf16 = 5e-2,
+            .expected = {4.0, 4.0, 4.5, 8.5, 5.5, 5.0, 8.0, 6.0, 7.0, 4.5}
+        }
+    };
+    const int ncases = (int)(sizeof(cases) / sizeof(cases[0]));
+    const char *types[] = {"f32", "f16", "bf16"};
+
+    for (int t = 0; t < 3; t++) {
+        for (int i = 0; i < ncases; i++) {
+            test_one_distance_case(db, types[t], &cases[i]);
+        }
+    }
+}
+
+typedef struct {
+    const char *distance_name;
+    double eps_i8;
+    double eps_u8;
+    double expected[10];
+} expected_int_distance_case;
+
+static double eps_for_int_type(const expected_int_distance_case *tc, const char *vtype) {
+    if (strcasecmp(vtype, "i8") == 0) return tc->eps_i8;
+    return tc->eps_u8;
+}
+
+static void test_one_int_distance_case(sqlite3 *db, const char *vtype, const expected_int_distance_case *tc) {
+    char tbl[64];
+    char sql[1024];
+    char msg[256];
+    double eps = eps_for_int_type(tc, vtype);
+
+    snprintf(tbl, sizeof(tbl), "tdist_%s_%s", tc->distance_name, vtype);
+    for (char *p = tbl; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
+
+    if (setup_table(db, tbl, vtype, tc->distance_name, 4, distance_int_vecs, distance_int_nvecs) != 0) {
+        snprintf(msg, sizeof(msg), "%s/%s int distance setup", vtype, tc->distance_name);
+        ASSERT(0, msg);
+        return;
+    }
+
+    scan_result r = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT id, distance FROM vector_full_scan('%s', 'v', vector_as_%s('%s')) ORDER BY id;",
+             tbl, vtype, distance_int_query);
+    char *err = NULL;
+    int rc = sqlite3_exec(db, sql, scan_cb, &r, &err);
+    snprintf(msg, sizeof(msg), "%s/%s int distance query executes", vtype, tc->distance_name);
+    ASSERT(rc == SQLITE_OK, msg);
+    if (err) { printf("  err: %s\n", err); sqlite3_free(err); }
+    if (rc != SQLITE_OK) return;
+
+    snprintf(msg, sizeof(msg), "%s/%s int distance query returns all rows", vtype, tc->distance_name);
+    ASSERT(r.count == distance_int_nvecs, msg);
+    if (r.count != distance_int_nvecs) return;
+
+    for (int i = 0; i < distance_int_nvecs; i++) {
+        int id_ok = (r.ids[i] == (i + 1));
+        snprintf(msg, sizeof(msg), "%s/%s int row id matches expected (row %d)",
+                 vtype, tc->distance_name, i + 1);
+        ASSERT(id_ok, msg);
+
+        double diff = fabs(r.distances[i] - tc->expected[i]);
+        int within_eps = diff <= eps;
+        snprintf(msg, sizeof(msg), "%s/%s int distance within epsilon (id=%d, diff=%.8g, eps=%.3g)",
+                 vtype, tc->distance_name, i + 1, diff, eps);
+        ASSERT(within_eps, msg);
+    }
+}
+
+static void test_distance_functions_int(sqlite3 *db) {
+    const expected_int_distance_case cases[] = {
+        {
+            .distance_name = "L2",
+            .eps_i8 = 1e-6,
+            .eps_u8 = 1e-6,
+            .expected = {
+                9.949874371066199,
+                12.529964086141668,
+                13.674794331177344,
+                4.472135954999580,
+                15.556349186104045,
+                12.806248474865697,
+                11.704699910719626,
+                13.601470508735444,
+                12.124355652982141,
+                4.242640687119285
+            }
+        },
+        {
+            .distance_name = "SQUARED_L2",
+            .eps_i8 = 1e-6,
+            .eps_u8 = 1e-6,
+            .expected = {99.0, 157.0, 187.0, 20.0, 242.0, 164.0, 137.0, 185.0, 147.0, 18.0}
+        },
+        {
+            .distance_name = "COSINE",
+            .eps_i8 = 1e-6,
+            .eps_u8 = 1e-6,
+            .expected = {
+                0.197058901598547,
+                0.278725549597720,
+                0.161317797973194,
+                0.036913175313846,
+                0.449627749704491,
+                0.182558273343614,
+                0.126858993881120,
+                0.205091387999948,
+                0.144927951966812,
+                0.000283884548207
+            }
+        },
+        {
+            .distance_name = "DOT",
+            .eps_i8 = 1e-6,
+            .eps_u8 = 1e-6,
+            .expected = {-165.0, -203.0, -337.0, -256.0, -148.0, -300.0, -333.0, -295.0, -323.0, -346.0}
+        },
+        {
+            .distance_name = "L1",
+            .eps_i8 = 1e-6,
+            .eps_u8 = 1e-6,
+            .expected = {19.0, 23.0, 19.0, 8.0, 30.0, 24.0, 21.0, 25.0, 19.0, 8.0}
+        }
+    };
+    const int ncases = (int)(sizeof(cases) / sizeof(cases[0]));
+    const char *types[] = {"i8", "u8"};
+
+    for (int t = 0; t < 2; t++) {
+        for (int i = 0; i < ncases; i++) {
+            test_one_int_distance_case(db, types[t], &cases[i]);
+        }
+    }
+}
+
+static void test_distance_functions_hamming(sqlite3 *db) {
+    const char *tbl = "tdist_hamming_bit";
+    const double expected[] = {3.0, 5.0, 3.0, 5.0, 4.0, 4.0, 4.0, 3.0, 5.0, 4.0};
+    char sql[1024];
+    char msg[256];
+
+    if (setup_table(db, tbl, "bit", "HAMMING", 8, bit_vecs, bit_nvecs) != 0) {
+        ASSERT(0, "bit/HAMMING distance setup");
+        return;
+    }
+
+    scan_result r = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT id, distance FROM vector_full_scan('%s', 'v', vector_as_bit('%s')) ORDER BY id;",
+             tbl, bit_query);
+    char *err = NULL;
+    int rc = sqlite3_exec(db, sql, scan_cb, &r, &err);
+    ASSERT(rc == SQLITE_OK, "bit/HAMMING distance query executes");
+    if (err) { printf("  err: %s\n", err); sqlite3_free(err); }
+    if (rc != SQLITE_OK) return;
+
+    ASSERT(r.count == bit_nvecs, "bit/HAMMING distance query returns all rows");
+    if (r.count != bit_nvecs) return;
+
+    for (int i = 0; i < bit_nvecs; i++) {
+        int id_ok = (r.ids[i] == (i + 1));
+        snprintf(msg, sizeof(msg), "bit/HAMMING row id matches expected (row %d)", i + 1);
+        ASSERT(id_ok, msg);
+
+        int exact_match = (r.distances[i] == expected[i]);
+        snprintf(msg, sizeof(msg), "bit/HAMMING distance matches exactly (id=%d)", i + 1);
+        ASSERT(exact_match, msg);
+    }
+}
+
 /* ---------- Main ---------- */
 
 int main(void) {
@@ -425,6 +743,16 @@ int main(void) {
             }
         }
     }
+
+
+    /* 5. distance functions */
+    printf("\n=== distance_functions ===\n");
+    {
+        test_distance_functions_float(db);
+        test_distance_functions_int(db);
+        test_distance_functions_hamming(db);
+    }
+
 
     sqlite3_close(db);
 
