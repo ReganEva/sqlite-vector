@@ -8,7 +8,7 @@
 #include "distance-rvv.h"
 #include "distance-cpu.h"
 
-#if defined(__riscv_vector)
+#if defined(__riscv_v_intrinsic)
 #include <riscv_vector.h>
 #include <math.h>
 #include <stdio.h>
@@ -19,46 +19,100 @@ extern const char *distance_backend_name;
 
 // MARK: - FLOAT32 -
 
-float float32_distance_l2_rvv (const void *v1, const void *v2, int n) {
-    printf("float32_distance_l2_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
-}
-
-float float32_distance_l2_squared_rvv (const void *v1, const void *v2, int n) {
-    printf("float32_distance_l2_squared_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
-}
-
-float float32_distance_l1_rvv (const void *v1, const void *v2, int n) {
-    printf("float32_distance_l1_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
-}
-
-float float32_distance_dot_rvv (const void *v1, const void *v2, int n) {
-    printf("float32_distance_dot_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
-}
-
-float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
+float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool use_sqrt) {
     const float *a = (const float *)v1;
     const float *b = (const float *)v2;
 
-    // We accumulate the results into a vecto register
-    size_t vl = __riscv_vsetvl_e32m1(1);
-    vfloat32m1_t dot_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
-    vfloat32m1_t magn_a_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
-    vfloat32m1_t magn_b_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
+    // We accumulate the results into a vector register
+    size_t vl = __riscv_vsetvl_e32m8(n);
+    vfloat32m8_t vl2 = __riscv_vfmv_v_f_f32m8(0.0f, vl);
 
-  
     // Iterate by VL elements
-    for (; n > 0; n -= vl) {
+    for (size_t i = n; i > 0; i -= vl) {
         // Use LMUL=8, we have 4 registers to work with.
-        // In practice we use 3, and the last register gets split for the reduction operations
         vl = __riscv_vsetvl_e32m8(n);
+
+        // Load the vectors into the registers
+        vfloat32m8_t va = __riscv_vle32_v_f32m8(a, vl);
+        vfloat32m8_t vb = __riscv_vle32_v_f32m8(b, vl);
+
+        // L2 = (a[i] - b[i]) + acc
+        vfloat32m8_t vdiff = __riscv_vfsub_vv_f32m8(va, vb, vl);
+        vl2 = __riscv_vfmacc_vv_f32m8(vl2, vdiff, vdiff, vl);
+        
+        // Advance the a and b pointers to the next offset
+        a = &a[vl];
+        b = &b[vl];
+    }
+
+    // Copy the accumulators back into a scalar register
+    vfloat32m1_t vl2_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
+    vl = __riscv_vsetvl_e32m8(n);
+    vl2_acc = __riscv_vfredusum_vs_f32m8_f32m1(vl2, vl2_acc, vl);
+
+    float l2 = __riscv_vfmv_f_s_f32m1_f32(vl2_acc);
+    return use_sqrt ? sqrtf(l2) : l2;
+}
+
+
+float float32_distance_l2_rvv (const void *v1, const void *v2, int n) {
+    return float32_distance_l2_impl_rvv(v1, v2, n, true);
+}
+
+
+float float32_distance_l2_squared_rvv (const void *v1, const void *v2, int n) {
+    return float32_distance_l2_impl_rvv(v1, v2, n, false);
+}
+
+float float32_distance_l1_rvv (const void *v1, const void *v2, int n) {
+    const float *a = (const float *)v1;
+    const float *b = (const float *)v2;
+
+    // We accumulate the results into a vector register
+    size_t vl = __riscv_vsetvl_e32m8(n);
+    vfloat32m8_t vsad = __riscv_vfmv_v_f_f32m8(0.0f, vl);
+
+    // Iterate by VL elements
+    for (size_t i = n; i > 0; i -= vl) {
+        // Use LMUL=8, we have 4 registers to work with.
+        vl = __riscv_vsetvl_e32m8(n);
+
+        // Load the vectors into the registers
+        vfloat32m8_t va = __riscv_vle32_v_f32m8(a, vl);
+        vfloat32m8_t vb = __riscv_vle32_v_f32m8(b, vl);
+
+
+        // SAD = abs(a[i] - b[i]) + acc
+        vfloat32m8_t vdiff = __riscv_vfsub_vv_f32m8(va, vb, vl);
+        vfloat32m8_t vabs = __riscv_vfabs_v_f32m8(vdiff, vl);
+        vsad = __riscv_vfadd_vv_f32m8(vsad, vabs, vl);
+        
+        // Advance the a and b pointers to the next offset
+        a = &a[vl];
+        b = &b[vl];
+    }
+
+    // Copy the accumulators back into a scalar register
+    vfloat32m1_t vsad_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
+    vl = __riscv_vsetvl_e32m8(n);
+    vsad_acc = __riscv_vfredusum_vs_f32m8_f32m1(vsad, vsad_acc, vl);
+
+    float sad = __riscv_vfmv_f_s_f32m1_f32(vsad_acc);
+    return sad;
+}
+
+float float32_distance_dot_rvv (const void *v1, const void *v2, int n) {
+    const float *a = (const float *)v1;
+    const float *b = (const float *)v2;
+
+    // We accumulate the results into a vector register
+    size_t vl = __riscv_vsetvl_e32m8(n);
+    vfloat32m8_t vdot = __riscv_vfmv_v_f_f32m8(0.0f, vl);
+
+    // Iterate by VL elements
+    for (size_t i = n; i > 0; i -= vl) {
+        // Use LMUL=8, we have 4 registers to work with.
+        vl = __riscv_vsetvl_e32m8(i);
 
         // Load the vectors into the registers
         vfloat32m8_t va = __riscv_vle32_v_f32m8(a, vl);
@@ -66,25 +120,70 @@ float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
 
         // Compute the dot product for the entire register, and sum the
         // results into the accumuating register
-        vfloat32m8_t vdot = __riscv_vfmul_vv_f32m8(va, vb, vl);
-        dot_acc = __riscv_vfredusum_vs_f32m8_f32m1(vdot, dot_acc, vl);
+        vdot = __riscv_vfmacc_vv_f32m8(vdot, va, vb, vl);
+        
+        // Advance the a and b pointers to the next offset
+        a = &a[vl];
+        b = &b[vl];
+    }
+
+    // Copy the accumulators back into a scalar register
+    vfloat32m1_t vdot_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
+    vl = __riscv_vsetvl_e32m8(n);
+    vdot_acc = __riscv_vfredusum_vs_f32m8_f32m1(vdot, vdot_acc, vl);
+
+    float dot = __riscv_vfmv_f_s_f32m1_f32(vdot_acc);
+    return -dot;
+}
+
+float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
+    const float *a = (const float *)v1;
+    const float *b = (const float *)v2;
+
+    // Use LMUL=4, we have 8 registers to work with.
+    size_t vl = __riscv_vsetvl_e32m4(n);
+
+    // Zero out the starting registers
+    vfloat32m4_t vdot = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+    vfloat32m4_t vmagn_a = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+    vfloat32m4_t vmagn_b = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+
+    // Iterate by VL elements
+    for (size_t i = n; i > 0; i -= vl) {
+        // Update VL with the remaining elements
+        vl = __riscv_vsetvl_e32m4(i);
+
+        // Load the vectors into the registers
+        vfloat32m4_t va = __riscv_vle32_v_f32m4(a, vl);
+        vfloat32m4_t vb = __riscv_vle32_v_f32m4(b, vl);
+
+        // Compute the dot product for the entire register
+        vdot = __riscv_vfmacc_vv_f32m4(vdot, va, vb, vl);
 
         // Also calculate the magnitude value for both a and b
-        vfloat32m8_t magn_a = __riscv_vfmul_vv_f32m8(va, va, vl);
-        magn_a_acc = __riscv_vfredusum_vs_f32m8_f32m1(magn_a, magn_a_acc, vl);
-        vfloat32m8_t magn_b = __riscv_vfmul_vv_f32m8(vb, vb, vl);
-        magn_b_acc = __riscv_vfredusum_vs_f32m8_f32m1(magn_b, magn_b_acc, vl);
+        vmagn_a = __riscv_vfmacc_vv_f32m4(vmagn_a, va, va, vl);
+        vmagn_b = __riscv_vfmacc_vv_f32m4(vmagn_b, vb, vb, vl);
 
         // Advance the a and b pointers to the next offset
         a = &a[vl];
         b = &b[vl];
     }
 
+    // Now do a final reduction on the registers to sum the remaining elements
+    vfloat32m1_t vdot_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
+    vdot_acc = __riscv_vfredusum_vs_f32m4_f32m1(vdot, vdot_acc, vl);
+
+    vfloat32m1_t vmagn_a_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
+    vmagn_a_acc = __riscv_vfredusum_vs_f32m4_f32m1(vmagn_a, vmagn_a_acc, vl);
+
+    vfloat32m1_t vmagn_b_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
+    vmagn_b_acc = __riscv_vfredusum_vs_f32m4_f32m1(vmagn_b, vmagn_b_acc, vl);
+
     // Copy the accumulators back into a scalar register, to finalize the calculations
     // TODO: With default flags this does not use the fsqrt.s/fmin.s/fmax.s instruction, we should fix that
-    float dot = __riscv_vfmv_f_s_f32m1_f32(dot_acc);
-    float magn_a = sqrtf(__riscv_vfmv_f_s_f32m1_f32(magn_a_acc));
-    float magn_b = sqrtf(__riscv_vfmv_f_s_f32m1_f32(magn_b_acc));
+    float dot = __riscv_vfmv_f_s_f32m1_f32(vdot_acc);
+    float magn_a = sqrtf(__riscv_vfmv_f_s_f32m1_f32(vmagn_a_acc));
+    float magn_b = sqrtf(__riscv_vfmv_f_s_f32m1_f32(vmagn_b_acc));
 
     if (magn_a == 0.0f || magn_b == 0.0f) return 1.0f;
 
@@ -93,7 +192,6 @@ float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
     if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
     return 1.0f - cosine_similarity;
 }
-
 
 // MARK: - FLOAT16 -
 
@@ -236,14 +334,14 @@ float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
 // MARK: -
 
 void init_distance_functions_rvv (void) {
-#if defined(__riscv_vector)
-    // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_F32] = float32_distance_l2_rvv;
+#if defined(__riscv_v_intrinsic)
+    dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_F32] = float32_distance_l2_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_F16] = float16_distance_l2_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_U8] = uint8_distance_l2_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_I8] = int8_distance_l2_rvv;
     
-    // dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_F32] = float32_distance_l2_squared_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_F32] = float32_distance_l2_squared_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_F16] = float16_distance_l2_squared_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_squared_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_U8] = uint8_distance_l2_squared_rvv;
@@ -255,13 +353,13 @@ void init_distance_functions_rvv (void) {
     // dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_U8] = uint8_distance_cosine_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_I8] = int8_distance_cosine_rvv;
     
-    // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_F32] = float32_distance_dot_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_F32] = float32_distance_dot_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_F16] = float16_distance_dot_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_BF16] = bfloat16_distance_dot_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_U8] = uint8_distance_dot_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_I8] = int8_distance_dot_rvv;
     
-    // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_F32] = float32_distance_l1_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_F32] = float32_distance_l1_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_F16] = float16_distance_l1_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_rvv;
