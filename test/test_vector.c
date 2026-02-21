@@ -86,6 +86,17 @@ static int scan_cb(void *ctx, int ncols, char **vals, char **names) {
     return 0;
 }
 
+/* Like scan_cb but reads distance from column 0 (for queries where distance is first). */
+static int scan_cb_col0(void *ctx, int ncols, char **vals, char **names) {
+    (void)names;
+    scan_result *r = (scan_result *)ctx;
+    if (r->count < 64 && ncols >= 1 && vals[0]) {
+        r->distances[r->count] = atof(vals[0]);
+    }
+    r->count++;
+    return 0;
+}
+
 /* ---------- Test: basics ---------- */
 
 static void test_basics(sqlite3 *db) {
@@ -386,7 +397,90 @@ int main(void) {
         test_quantize_scan(db, "bit", "1BIT", 8, bit_vecs, bit_nvecs, bit_query);
     }
 
-    /* 4. Backward-compat aliases */
+    /* 4. Streaming ORDER BY (regression test for issue #43) */
+    printf("\n=== Streaming ORDER BY ===\n");
+    {
+        /*
+         * Regression test: vector_full_scan_stream with ORDER BY + LIMIT
+         * must return results sorted by distance.  A bug in vFullScanBestIndex
+         * caused orderByConsumed=1 even in streaming mode, so SQLite skipped
+         * sorting and returned rows in table order.
+         *
+         * We insert vectors in REVERSE distance order (farthest first) so
+         * that table-order != distance-order, exposing the bug.
+         */
+        const char *tbl = "tfs_stream_order";
+        const char *vecs_ordered[] = {
+            "[10.0, 0.0, 0.0, 0.0]",   /* id 1: far   */
+            "[0.0, 10.0, 0.0, 0.0]",   /* id 2: far   */
+            "[5.0, 5.0, 0.0, 0.0]",    /* id 3: far   */
+            "[2.0, 0.0, 0.0, 0.0]",    /* id 4: mid   */
+            "[1.0, 1.0, 0.0, 0.0]",    /* id 5: mid   */
+            "[0.6, 0.6, 0.6, 0.6]",    /* id 6: close */
+            "[0.4, 0.4, 0.4, 0.4]",    /* id 7: close */
+            "[0.5, 0.5, 0.5, 0.5]",    /* id 8: exact */
+            "[0.3, 0.3, 0.3, 0.3]",    /* id 9: close */
+            "[0.7, 0.7, 0.7, 0.7]",    /* id 10: close */
+        };
+        const char *qvec = "[0.5, 0.5, 0.5, 0.5]";
+
+        if (setup_table(db, tbl, "f32", "L2", 4, vecs_ordered, 10) == 0) {
+            /* Helper callback: distance is column 0 in these queries */
+            struct { int count; double distances[64]; } r;
+
+            /* vector_full_scan_stream + JOIN + ORDER BY distance LIMIT */
+            {
+                memset(&r, 0, sizeof(r));
+                char sql[1024];
+                snprintf(sql, sizeof(sql),
+                    "SELECT vss.distance, t.id"
+                    " FROM \"%s\" t"
+                    " INNER JOIN vector_full_scan_stream('%s', 'v', vector_as_f32('%s'))"
+                    "   AS vss ON vss.rowid = t.id"
+                    " ORDER BY vss.distance LIMIT 5;",
+                    tbl, tbl, qvec);
+                char *err = NULL;
+                rc = sqlite3_exec(db, sql, scan_cb_col0, &r, &err);
+                ASSERT(rc == SQLITE_OK, "stream+JOIN+ORDER BY executes");
+                if (err) { printf("  err: %s\n", err); sqlite3_free(err); }
+
+                ASSERT(r.count == 5, "stream+JOIN+ORDER BY returns 5 rows");
+
+                int sorted = 1;
+                for (int i = 1; i < r.count; i++) {
+                    if (r.distances[i] < r.distances[i - 1]) sorted = 0;
+                }
+                ASSERT(sorted, "stream+JOIN+ORDER BY distances sorted");
+                ASSERT(r.distances[0] < 0.01, "stream+JOIN+ORDER BY closest is ~0");
+            }
+
+            /* vector_full_scan (no k, streaming) + ORDER BY distance LIMIT */
+            {
+                memset(&r, 0, sizeof(r));
+                char sql[1024];
+                snprintf(sql, sizeof(sql),
+                    "SELECT distance, rowid"
+                    " FROM vector_full_scan_stream('%s', 'v', vector_as_f32('%s'))"
+                    " ORDER BY distance LIMIT 5;",
+                    tbl, qvec);
+                char *err = NULL;
+                rc = sqlite3_exec(db, sql, scan_cb_col0, &r, &err);
+                ASSERT(rc == SQLITE_OK, "stream+ORDER BY executes");
+                if (err) { printf("  err: %s\n", err); sqlite3_free(err); }
+
+                ASSERT(r.count == 5, "stream+ORDER BY returns 5 rows");
+
+                int sorted = 1;
+                for (int i = 1; i < r.count; i++) {
+                    if (r.distances[i] < r.distances[i - 1]) sorted = 0;
+                }
+                ASSERT(sorted, "stream+ORDER BY distances sorted");
+                ASSERT(r.distances[0] < 0.01, "stream+ORDER BY closest is ~0");
+            }
+        }
+    }
+
+    /* 5. Backward-compat aliases */
     printf("\n=== Backward-compat aliases ===\n");
     {
         /* Set up a table for alias tests */

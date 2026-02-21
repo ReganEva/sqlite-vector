@@ -2030,8 +2030,13 @@ static int vFullScanDisconnect (sqlite3_vtab *pVtab) {
 }
 
 static int vFullScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) {
-    bool has_k = false;
-    int k_index = -1;
+    // With positional args to the table-valued function:
+    //   3 args: f('tbl','col',vector)      → columns 0,1,2 constrained (streaming)
+    //   4 args: f('tbl','col',vector,k)    → columns 0,1,2,3 constrained (top-k)
+    // Column 2 (K) always receives the vector blob (positional arg 2).
+    // Column 3 (MEMIDX) receives the actual k integer only with 4 args.
+    // So top-k mode is determined by whether MEMIDX is constrained, not K.
+    bool has_topk = false;
 
     const struct sqlite3_index_constraint *pConstraint = pIdxInfo->aConstraint;
     for(int i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){
@@ -2047,26 +2052,25 @@ static int vFullScanBestIndex (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) 
                 pIdxInfo->aConstraintUsage[i].omit = 1;
                 break;
             case VECTOR_COLUMN_K:
-                has_k = true;
-                k_index = i;
+                pIdxInfo->aConstraintUsage[i].argvIndex = 3;
+                pIdxInfo->aConstraintUsage[i].omit = 1;
                 break;
             case VECTOR_COLUMN_MEMIDX:
+                has_topk = true;
                 pIdxInfo->aConstraintUsage[i].argvIndex = 4;
                 pIdxInfo->aConstraintUsage[i].omit = 1;
                 break;
         }
     }
 
-    if (has_k) {
-        // top-k mode
-        pIdxInfo->aConstraintUsage[k_index].argvIndex = 3;
-        pIdxInfo->aConstraintUsage[k_index].omit = 1;
+    if (has_topk) {
+        // top-k mode: 4 positional args, argv[3] has the k integer
         pIdxInfo->estimatedCost = (double)1;
         pIdxInfo->estimatedRows = 100;
         pIdxInfo->orderByConsumed = 1;
         pIdxInfo->idxNum = 1;
     } else {
-        // streaming mode
+        // streaming mode: 3 positional args, no sorting guaranteed
         pIdxInfo->estimatedCost = 1e8;
         pIdxInfo->estimatedRows = 100000;
         pIdxInfo->idxNum = 2;
