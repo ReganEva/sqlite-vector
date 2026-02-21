@@ -100,6 +100,7 @@ SQLITE_EXTENSION_INIT1
                                                     ((int64_t)((uint8_t)(_ptr)[7]) << 56))
 
 #define SWAP(_t, a, b)                              do { _t tmp = (a); (a) = (b); (b) = tmp; } while (0)
+#define KEY_MATCH(_k)                               (key_len == (int)sizeof(_k) - 1 && strncasecmp(key, _k, key_len) == 0)
 
 #define VECTOR_COLUMN_IDX                           0
 #define VECTOR_COLUMN_VECTOR                        1
@@ -1054,47 +1055,47 @@ bool vector_keyvalue_callback (sqlite3_context *context, void *xdata, const char
     char buffer[256] = {0};
     size_t len = ((size_t)value_len > sizeof(buffer)-1) ? sizeof(buffer)-1 : (size_t)value_len;
     memcpy(buffer, value, len);
-    
-    if (strncasecmp(key, OPTION_KEY_TYPE, key_len) == 0) {
+
+    if (KEY_MATCH(OPTION_KEY_TYPE)) {
         vector_type type = vector_name_to_type(buffer);
         if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector type: '%s' is not a recognized type", buffer);
         options->v_type = type;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_DIMENSION, key_len) == 0) {
+    if (KEY_MATCH(OPTION_KEY_DIMENSION)) {
         int dimension = (int)strtol(buffer, NULL, 0);
         if (dimension <= 0) return context_result_error(context, SQLITE_ERROR, "Invalid vector dimension: expected a positive integer, got '%s'", buffer);
         options->v_dim = dimension;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_NORMALIZED, key_len) == 0) {
+    if (KEY_MATCH(OPTION_KEY_NORMALIZED)) {
         int normalized = (int)strtol(buffer, NULL, 0);
         options->v_normalized = (normalized != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_MAXMEMORY, key_len) == 0) {
+    if (KEY_MATCH(OPTION_KEY_MAXMEMORY)) {
         uint64_t max_memory = human_to_number(buffer);
         if (max_memory > 0) options->max_memory = max_memory;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_QUANTTYPE, key_len) == 0) {
+    if (KEY_MATCH(OPTION_KEY_QUANTTYPE)) {
         vector_qtype type = quant_name_to_type(buffer);
         if ((int)type == -1) return context_result_error(context, SQLITE_ERROR, "Invalid quantization type: '%s' is not a recognized or supported quantization type", buffer);
         options->q_type = type;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_DISTANCE, key_len) == 0) {
+    if (KEY_MATCH(OPTION_KEY_DISTANCE)) {
         vector_distance type = distance_name_to_type(buffer);
         if (type == 0) return context_result_error(context, SQLITE_ERROR, "Invalid distance name: '%s' is not a recognized or supported distance", buffer);
         options->v_distance = type;
         return true;
     }
-    
+
     // means ignore unknown keys
     return true;
 }
@@ -1191,7 +1192,7 @@ void vector_context_add (sqlite3_context *context, vector_context *ctx, const ch
 
     // sanity check primary key
     if (!prikey) {
-        (is_without_rowid) ? context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate rowid column name") : context_result_error(context, SQLITE_ERROR, "WITHOUT ROWID table '%s' must have exactly one PRIMARY KEY column of type INTEGER", table_name);
+        (is_without_rowid) ? context_result_error(context, SQLITE_ERROR, "WITHOUT ROWID table '%s' must have exactly one PRIMARY KEY column of type INTEGER", table_name) : context_result_error(context, SQLITE_NOMEM, "Out of memory: unable to duplicate rowid column name");
         sqlite3_free(t_name);
         sqlite3_free(c_name);
         return;
@@ -1945,11 +1946,13 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
     }
     
     const void *vector = NULL;
+    bool vector_allocated = false;
     int vsize = 0;
     if (sqlite3_value_type(argv[2]) == SQLITE_TEXT) {
         vsize = sqlite3_value_bytes(argv[2]);
         vector = (const void *)vector_from_json(NULL, &vtab->base, t_ctx->options.v_type, (const char *)sqlite3_value_text(argv[2]), &vsize, t_ctx->options.v_dim);
         if (!vector) return SQLITE_ERROR; // error already set inside vector_from_json
+        vector_allocated = true;
     } else {
         vector = (const void *)sqlite3_value_blob(argv[2]);
         vsize = sqlite3_value_bytes(argv[2]);
@@ -1962,48 +1965,60 @@ static int vCursorFilterCommon (sqlite3_vtab_cursor *cur, int idxNum, const char
         char *name = generate_quant_table_name(table_name, column_name, buffer);
         if (!name || !sqlite_table_exists(vtab->db, name)) {
             sqlite_vtab_set_error(&vtab->base, "Quantization table not found for table '%s' and column '%s'. Ensure that vector_quantize() has been called before using vector_quantize_scan()", table_name, column_name);
+            if (vector_allocated) sqlite3_free((void *)vector);
             return SQLITE_ERROR;
         }
     }
-    
+
     c->table = t_ctx;
     if (is_streaming) {
         int rc = stream_callback(vtab->db, c, vector, vsize);
+        if (vector_allocated) sqlite3_free((void *)vector);
         if (rc != SQLITE_OK) return rc;
         return vFullScanCursorNext((sqlite3_vtab_cursor *)c);  // Position on first row
     }
 
     // non-streaming flow
     int k = sqlite3_value_int(argv[3]);
-    if (k == 0) return SQLITE_DONE;
-    
+    if (k == 0) {
+        if (vector_allocated) sqlite3_free((void *)vector);
+        return SQLITE_DONE;
+    }
+
     if (c->row_count != k) {
         if (c->rowids) sqlite3_free(c->rowids);
         c->rowids = (int64_t *)sqlite3_malloc(k * sizeof(int64_t));
-        if (c->rowids == NULL) return SQLITE_NOMEM;
-        
+        if (c->rowids == NULL) {
+            if (vector_allocated) sqlite3_free((void *)vector);
+            return SQLITE_NOMEM;
+        }
+
         if (c->distance) sqlite3_free(c->distance);
         c->distance = (double *)sqlite3_malloc(k * sizeof(double));
-        if (c->distance == NULL) return SQLITE_NOMEM;
+        if (c->distance == NULL) {
+            if (vector_allocated) sqlite3_free((void *)vector);
+            return SQLITE_NOMEM;
+        }
     }
-    
+
     memset(c->rowids, 0, k * sizeof(int64_t));
     for (int i=0; i<k; ++i) c->distance[i] = INFINITY;
-    
+
     c->size = 0;
     c->row_index = 0;
     c->row_count = k;
-    
+
     int rc = run_callback(vtab->db, c, vector, vsize);
+    if (vector_allocated) sqlite3_free((void *)vector);
     int count = sort_callback(c);
     c->row_count -= count;
-    
+
     #if 0
     for (int i=0; i<c->row_count; ++i) {
         printf("%lld\t%f\n", (long long)c->rowids[i], c->distance[i]);
     }
     #endif
-    
+
     return rc;
 }
 

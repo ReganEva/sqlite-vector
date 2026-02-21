@@ -873,17 +873,16 @@ static inline __m512i popcount_avx512(__m512i v) {
 }
 
 // Hamming distance for 1-bit packed binary vectors
-// n = number of dimensions (bits), not bytes
+// n = number of bytes (callers pass (dimension + 7) / 8)
 static float bit1_distance_hamming_avx512(const void *v1, const void *v2, int n) {
     const uint8_t *a = (const uint8_t *)v1;
     const uint8_t *b = (const uint8_t *)v2;
-    int num_bytes = (n + 7) / 8;
 
     __m512i acc = _mm512_setzero_si512();
     int i = 0;
 
     // Process 64 bytes at a time
-    for (; i + 64 <= num_bytes; i += 64) {
+    for (; i + 64 <= n; i += 64) {
         __m512i va = _mm512_loadu_si512((const __m512i *)(a + i));
         __m512i vb = _mm512_loadu_si512((const __m512i *)(b + i));
         __m512i xored = _mm512_xor_si512(va, vb);
@@ -904,7 +903,7 @@ static float bit1_distance_hamming_avx512(const void *v1, const void *v2, int n)
     uint64_t distance = _mm512_reduce_add_epi64(acc);
 
     // Handle remaining bytes with scalar code
-    for (; i < num_bytes; i++) {
+    for (; i < n; i++) {
 #if defined(__GNUC__) || defined(__clang__)
         distance += __builtin_popcount(a[i] ^ b[i]);
 #else
