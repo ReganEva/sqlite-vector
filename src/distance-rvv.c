@@ -50,7 +50,7 @@ float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool 
     const float *b = (const float *)v2;
 
     // We accumulate the results into a vector register
-    size_t vl = __riscv_vsetvl_e32m8(n);
+    size_t vl = __riscv_vsetvlmax_e32m8();
     vfloat32m8_t vl2 = __riscv_vfmv_v_f_f32m8(0.0f, vl);
 
     // Iterate by VL elements
@@ -90,7 +90,7 @@ float float32_distance_l1_rvv (const void *v1, const void *v2, int n) {
     const float *b = (const float *)v2;
 
     // We accumulate the results into a vector register
-    size_t vl = __riscv_vsetvl_e32m8(n);
+    size_t vl = __riscv_vsetvlmax_e32m8();
     vfloat32m8_t vsad = __riscv_vfmv_v_f_f32m8(0.0f, vl);
 
     // Iterate by VL elements
@@ -122,7 +122,7 @@ float float32_distance_dot_rvv (const void *v1, const void *v2, int n) {
     const float *b = (const float *)v2;
 
     // We accumulate the results into a vector register
-    size_t vl = __riscv_vsetvl_e32m8(n);
+    size_t vl = __riscv_vsetvlmax_e32m8();
     vfloat32m8_t vdot = __riscv_vfmv_v_f_f32m8(0.0f, vl);
 
     // Iterate by VL elements
@@ -153,7 +153,7 @@ float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
     const float *b = (const float *)v2;
 
     // Use LMUL=4, we have 8 registers to work with.
-    size_t vl = __riscv_vsetvl_e32m4(n);
+    size_t vl = __riscv_vsetvlmax_e32m4();
 
     // Zero out the starting registers
     vfloat32m4_t vdot = __riscv_vfmv_v_f_f32m4(0.0f, vl);
@@ -360,7 +360,7 @@ float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
     const uint8_t *b = (const uint8_t *)v2;
 
     // We accumulate the results into a vector register
-    size_t vl = __riscv_vsetvl_e32m8(n);
+    size_t vl = __riscv_vsetvlmax_e64m8();
     vuint64m8_t vdistance = __riscv_vmv_s_x_u64m8(0, vl);
 
     // Iterate by VL elements
@@ -368,7 +368,7 @@ float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
         // Use LMUL=8, we have 4 registers to work with.
         vl = __riscv_vsetvl_e64m8(n);
 
-        // Load the vectors into the registers and cast them into a u64
+        // Load the vectors into the registers and cast them into a u64 inplace
         vuint64m8_t va = __riscv_vreinterpret_v_u8m8_u64m8(__riscv_vle8_v_u8m8(a, vl));
         vuint64m8_t vb = __riscv_vreinterpret_v_u8m8_u64m8(__riscv_vle8_v_u8m8(b, vl));
 
