@@ -35,6 +35,14 @@ float float32_sum_vector_f32m4(vfloat32m4_t vec, size_t vl) {
     return __riscv_vfmv_f_s_f32m1_f32(acc);
 }
 
+// Reduces a vector by summing all of it's elements into a single scalar integer
+uint64_t uint64_sum_vector_u64m8(vuint64m8_t vec, size_t vl) {
+    vuint64m1_t acc = __riscv_vmv_s_x_u64m1(0, 1);
+    vl = __riscv_vsetvl_e32m8(vl);
+    acc = __riscv_vredsum_vs_u64m8_u64m1(vec, acc, vl);
+    return __riscv_vmv_x_s_u64m1_u64(acc);
+}
+
 // MARK: - FLOAT32 -
 
 float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool use_sqrt) {
@@ -317,12 +325,66 @@ float int8_distance_cosine_rvv (const void *v1, const void *v2, int n) {
 
 // MARK: - BIT -
 
-float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
-    printf("bit1_distance_hamming_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+
+// Counts the number of set bits on each element of a vector register
+//
+// TODO: RISC-V natively supports vcpop.v for population count, but only with the
+// Zvbb extension, which we don't support yet. For everyone else, do a fallback implemetation.
+vuint64m8_t vpopcnt_u64m8(vuint64m8_t v, size_t vl) {
+    // v = v - ((v >> 1) & 0x5555555555555555ULL);
+    vuint64m8_t shr1 = __riscv_vsrl_vx_u64m8(v, 1, vl);
+    vuint64m8_t and1 = __riscv_vand_vx_u64m8(shr1, 0x5555555555555555ULL, vl);
+    v = __riscv_vsub_vv_u64m8(v, and1, vl);
+    
+    // v = (v & 0x3333333333333333ULL) + ((v >> 2) & 0x3333333333333333ULL);
+    vuint64m8_t shr2 = __riscv_vsrl_vx_u64m8(v, 2, vl);
+    vuint64m8_t and2 = __riscv_vand_vx_u64m8(shr2, 0x3333333333333333ULL, vl);
+    vuint64m8_t and3 = __riscv_vand_vx_u64m8(v, 0x3333333333333333ULL, vl);
+    v = __riscv_vadd_vv_u64m8(and2, and3, vl);
+
+    // v = (v + (v >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+    vuint64m8_t shr4 = __riscv_vsrl_vx_u64m8(v, 4, vl);
+    vuint64m8_t add = __riscv_vadd_vv_u64m8(v, shr4, vl);
+    v = __riscv_vand_vx_u64m8(add, 0x0f0f0f0f0f0f0f0fULL, vl);
+
+    // v = (v * 0x0101010101010101ULL) >> 56;
+    vuint64m8_t mul = __riscv_vmul_vx_u64m8(v, 0x0101010101010101ULL, vl);
+    v = __riscv_vsrl_vx_u64m8(mul, 56, vl);
+
+    return v;
 }
 
+
+float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
+    const uint8_t *a = (const uint8_t *)v1;
+    const uint8_t *b = (const uint8_t *)v2;
+
+    // We accumulate the results into a vector register
+    size_t vl = __riscv_vsetvl_e32m8(n);
+    vuint64m8_t vdistance = __riscv_vmv_s_x_u64m8(0, vl);
+
+    // Iterate by VL elements
+    for (size_t i = n; i > 0; i -= vl) {
+        // Use LMUL=8, we have 4 registers to work with.
+        vl = __riscv_vsetvl_e64m8(n);
+
+        // Load the vectors into the registers and cast them into a u64
+        vuint64m8_t va = __riscv_vreinterpret_v_u8m8_u64m8(__riscv_vle8_v_u8m8(a, vl));
+        vuint64m8_t vb = __riscv_vreinterpret_v_u8m8_u64m8(__riscv_vle8_v_u8m8(b, vl));
+
+        vuint64m8_t xor = __riscv_vxor_vv_u64m8(va, vb, vl);
+        vuint64m8_t popcnt = vpopcnt_u64m8(xor, vl);
+        vdistance = __riscv_vadd_vv_u64m8(vdistance, popcnt, vl);
+
+        // Advance the a and b pointers to the next offset. Here we multiply by 8 because
+        // the vectors are defined as u8, but VL is defined in elements of 64bits.
+        a = &a[vl * 8];
+        b = &b[vl * 8];
+    }
+
+    // Copy the accumulator back into a scalar register
+    return (float) uint64_sum_vector_u64m8(vdistance, vl);
+}
 #endif
 
 // MARK: -
@@ -359,7 +421,7 @@ void init_distance_functions_rvv (void) {
     // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_rvv;
     // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_rvv;
     
-    // dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_HAMMING][VECTOR_TYPE_BIT] = bit1_distance_hamming_rvv;
     
     distance_backend_name = "RVV";
 #endif
