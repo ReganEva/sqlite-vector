@@ -17,6 +17,24 @@
 extern distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX];
 extern const char *distance_backend_name;
 
+// MARK: - UTILS -
+
+// Reduces a vector by summing all of it's elements into a single scalar float
+float float32_sum_vector_f32m8(vfloat32m8_t vec, size_t vl) {
+    vfloat32m1_t acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
+    vl = __riscv_vsetvl_e32m8(vl);
+    acc = __riscv_vfredusum_vs_f32m8_f32m1(vec, acc, vl);
+    return __riscv_vfmv_f_s_f32m1_f32(acc);
+}
+
+// Reduces a vector by summing all of it's elements into a single scalar float
+float float32_sum_vector_f32m4(vfloat32m4_t vec, size_t vl) {
+    vfloat32m1_t acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
+    vl = __riscv_vsetvl_e32m4(vl);
+    acc = __riscv_vfredusum_vs_f32m4_f32m1(vec, acc, vl);
+    return __riscv_vfmv_f_s_f32m1_f32(acc);
+}
+
 // MARK: - FLOAT32 -
 
 float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool use_sqrt) {
@@ -46,14 +64,9 @@ float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool 
     }
 
     // Copy the accumulators back into a scalar register
-    vfloat32m1_t vl2_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
-    vl = __riscv_vsetvl_e32m8(n);
-    vl2_acc = __riscv_vfredusum_vs_f32m8_f32m1(vl2, vl2_acc, vl);
-
-    float l2 = __riscv_vfmv_f_s_f32m1_f32(vl2_acc);
+    float l2 = float32_sum_vector_f32m8(vl2, n);
     return use_sqrt ? sqrtf(l2) : l2;
 }
-
 
 float float32_distance_l2_rvv (const void *v1, const void *v2, int n) {
     return float32_distance_l2_impl_rvv(v1, v2, n, true);
@@ -93,12 +106,7 @@ float float32_distance_l1_rvv (const void *v1, const void *v2, int n) {
     }
 
     // Copy the accumulators back into a scalar register
-    vfloat32m1_t vsad_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
-    vl = __riscv_vsetvl_e32m8(n);
-    vsad_acc = __riscv_vfredusum_vs_f32m8_f32m1(vsad, vsad_acc, vl);
-
-    float sad = __riscv_vfmv_f_s_f32m1_f32(vsad_acc);
-    return sad;
+    return float32_sum_vector_f32m8(vsad, n);
 }
 
 float float32_distance_dot_rvv (const void *v1, const void *v2, int n) {
@@ -128,11 +136,7 @@ float float32_distance_dot_rvv (const void *v1, const void *v2, int n) {
     }
 
     // Copy the accumulators back into a scalar register
-    vfloat32m1_t vdot_acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
-    vl = __riscv_vsetvl_e32m8(n);
-    vdot_acc = __riscv_vfredusum_vs_f32m8_f32m1(vdot, vdot_acc, vl);
-
-    float dot = __riscv_vfmv_f_s_f32m1_f32(vdot_acc);
+    float dot = float32_sum_vector_f32m8(vdot, n);
     return -dot;
 }
 
@@ -170,20 +174,10 @@ float float32_distance_cosine_rvv (const void *v1, const void *v2, int n) {
     }
 
     // Now do a final reduction on the registers to sum the remaining elements
-    vfloat32m1_t vdot_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
-    vdot_acc = __riscv_vfredusum_vs_f32m4_f32m1(vdot, vdot_acc, vl);
-
-    vfloat32m1_t vmagn_a_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
-    vmagn_a_acc = __riscv_vfredusum_vs_f32m4_f32m1(vmagn_a, vmagn_a_acc, vl);
-
-    vfloat32m1_t vmagn_b_acc = __riscv_vfmv_v_f_f32m1(0.0f, vl);
-    vmagn_b_acc = __riscv_vfredusum_vs_f32m4_f32m1(vmagn_b, vmagn_b_acc, vl);
-
-    // Copy the accumulators back into a scalar register, to finalize the calculations
-    // TODO: With default flags this does not use the fsqrt.s/fmin.s/fmax.s instruction, we should fix that
-    float dot = __riscv_vfmv_f_s_f32m1_f32(vdot_acc);
-    float magn_a = sqrtf(__riscv_vfmv_f_s_f32m1_f32(vmagn_a_acc));
-    float magn_b = sqrtf(__riscv_vfmv_f_s_f32m1_f32(vmagn_b_acc));
+    // TODO: With default flags this does not always use the fsqrt.s/fmin.s/fmax.s instruction, we should fix that
+    float dot = float32_sum_vector_f32m4(vdot, n);
+    float magn_a = sqrtf(float32_sum_vector_f32m4(vmagn_a, n));
+    float magn_b = sqrtf(float32_sum_vector_f32m4(vmagn_b, n));
 
     if (magn_a == 0.0f || magn_b == 0.0f) return 1.0f;
 
