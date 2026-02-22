@@ -20,7 +20,7 @@ extern const char *distance_backend_name;
 // MARK: - UTILS -
 
 // Reduces a vector by summing all of it's elements into a single scalar float
-static inline float float32_sum_vector_f32m8(vfloat32m8_t vec, size_t vl) {
+static inline float float32_sum_vector_f32m8 (vfloat32m8_t vec, size_t vl) {
     vfloat32m1_t acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
     vl = __riscv_vsetvl_e32m8(vl);
     acc = __riscv_vfredusum_vs_f32m8_f32m1(vec, acc, vl);
@@ -28,7 +28,7 @@ static inline float float32_sum_vector_f32m8(vfloat32m8_t vec, size_t vl) {
 }
 
 // Reduces a vector by summing all of it's elements into a single scalar float
-static inline float float32_sum_vector_f32m4(vfloat32m4_t vec, size_t vl) {
+static inline float float32_sum_vector_f32m4 (vfloat32m4_t vec, size_t vl) {
     vfloat32m1_t acc = __riscv_vfmv_v_f_f32m1(0.0f, 1);
     vl = __riscv_vsetvl_e32m4(vl);
     acc = __riscv_vfredusum_vs_f32m4_f32m1(vec, acc, vl);
@@ -36,7 +36,7 @@ static inline float float32_sum_vector_f32m4(vfloat32m4_t vec, size_t vl) {
 }
 
 // Reduces a vector by summing all of it's elements into a single scalar double
-static inline double float64_sum_vector_f64m4(vfloat64m4_t vec, size_t vl) {
+static inline double float64_sum_vector_f64m4 (vfloat64m4_t vec, size_t vl) {
     vfloat64m1_t acc = __riscv_vfmv_v_f_f64m1(0.0, 1);
     vl = __riscv_vsetvl_e64m4(vl);
     acc = __riscv_vfredusum_vs_f64m4_f64m1(vec, acc, vl);
@@ -44,7 +44,7 @@ static inline double float64_sum_vector_f64m4(vfloat64m4_t vec, size_t vl) {
 }
 
 // Reduces a vector by summing all of it's elements into a single scalar integer
-static inline uint64_t uint64_sum_vector_u64m8(vuint64m8_t vec, size_t vl) {
+static inline uint64_t uint64_sum_vector_u64m8 (vuint64m8_t vec, size_t vl) {
     vuint64m1_t acc = __riscv_vmv_s_x_u64m1(0, 1);
     vl = __riscv_vsetvl_e64m8(vl);
     acc = __riscv_vredsum_vs_u64m8_u64m1(vec, acc, vl);
@@ -52,7 +52,7 @@ static inline uint64_t uint64_sum_vector_u64m8(vuint64m8_t vec, size_t vl) {
 }
 
 // Reduces a vector by summing all of it's elements into a single scalar integer
-static inline uint32_t uint32_sum_vector_u32m8(vuint32m8_t vec, size_t vl) {
+static inline uint32_t uint32_sum_vector_u32m8 (vuint32m8_t vec, size_t vl) {
     vuint32m1_t acc = __riscv_vmv_s_x_u32m1(0, 1);
     vl = __riscv_vsetvl_e32m8(vl);
     acc = __riscv_vredsum_vs_u32m8_u32m1(vec, acc, vl);
@@ -60,7 +60,7 @@ static inline uint32_t uint32_sum_vector_u32m8(vuint32m8_t vec, size_t vl) {
 }
 
 // Reduces a vector by summing all of it's elements into a single scalar integer
-static inline int32_t int32_sum_vector_i32m8(vint32m8_t vec, size_t vl) {
+static inline int32_t int32_sum_vector_i32m8 (vint32m8_t vec, size_t vl) {
     vint32m1_t acc = __riscv_vmv_s_x_i32m1(0, 1);
     vl = __riscv_vsetvl_e32m8(vl);
     acc = __riscv_vredsum_vs_i32m8_i32m1(vec, acc, vl);
@@ -68,16 +68,40 @@ static inline int32_t int32_sum_vector_i32m8(vint32m8_t vec, size_t vl) {
 }
 
 // Scalar-load fp16 payloads, convert to fp32, and pack as an f32m2 vector.
-static inline vfloat32m2_t rvv_load_f16_as_f32m2(const uint16_t *src, size_t n) {
+static inline vfloat32m2_t rvv_load_f16_as_f32m2 (const uint16_t *src, size_t n) {
     size_t vl = __riscv_vsetvl_e32m2(n);
     float lanes[vl];
     for (size_t i = 0; i < vl; ++i) lanes[i] = float16_to_float32(src[i]);
     return __riscv_vle32_v_f32m2(lanes, vl);
 }
 
+// Scalar-load bf16 payloads, convert to fp32, and pack as an f32m8 vector.
+static inline vfloat32m8_t rvv_load_bf16_as_f32m8 (const uint16_t *src, size_t n) {
+    size_t vl = __riscv_vsetvl_e32m8(n);
+    float lanes[vl];
+    for (size_t i = 0; i < vl; ++i) lanes[i] = bfloat16_to_float32(src[i]);
+    return __riscv_vle32_v_f32m8(lanes, vl);
+}
+
+// Scalar-load bf16 payloads, convert to fp32, and pack as an f32m4 vector.
+static inline vfloat32m4_t rvv_load_bf16_as_f32m4 (const uint16_t *src, size_t n) {
+    size_t vl = __riscv_vsetvl_e32m4(n);
+    float lanes[vl];
+    for (size_t i = 0; i < vl; ++i) lanes[i] = bfloat16_to_float32(src[i]);
+    return __riscv_vle32_v_f32m4(lanes, vl);
+}
+
+// Scalar-load bf16 payloads, convert to fp32, and pack as an f32m2 vector.
+static inline vfloat32m2_t rvv_load_bf16_as_f32m2 (const uint16_t *src, size_t n) {
+    size_t vl = __riscv_vsetvl_e32m2(n);
+    float lanes[vl];
+    for (size_t i = 0; i < vl; ++i) lanes[i] = bfloat16_to_float32(src[i]);
+    return __riscv_vle32_v_f32m2(lanes, vl);
+}
+
 // Returns true if any lane has an fp16-style infinity mismatch:
 // one side is Inf and the other is not, or both are Inf with different signs.
-static inline bool rvv_has_f16_inf_mismatch_f64m4(vfloat64m4_t va, vfloat64m4_t vb, size_t vl) {
+static inline bool rvv_has_f16_inf_mismatch_f64m4 (vfloat64m4_t va, vfloat64m4_t vb, size_t vl) {
     vuint64m4_t a_class = __riscv_vfclass_v_u64m4(va, vl);
     vuint64m4_t b_class = __riscv_vfclass_v_u64m4(vb, vl);
     vuint64m4_t a_inf_bits = __riscv_vand_vx_u64m4(a_class, 0x81u, vl);
@@ -87,7 +111,7 @@ static inline bool rvv_has_f16_inf_mismatch_f64m4(vfloat64m4_t va, vfloat64m4_t 
 }
 
 // Returns mask of lanes where both vectors are not NaN.
-static inline vbool16_t rvv_both_not_nan_f64m4(vfloat64m4_t va, vfloat64m4_t vb, size_t vl) {
+static inline vbool16_t rvv_both_not_nan_f64m4 (vfloat64m4_t va, vfloat64m4_t vb, size_t vl) {
     vbool16_t a_not_nan = __riscv_vmfeq_vv_f64m4_b16(va, va, vl);
     vbool16_t b_not_nan = __riscv_vmfeq_vv_f64m4_b16(vb, vb, vl);
     return __riscv_vmand_mm_b16(a_not_nan, b_not_nan, vl);
@@ -107,7 +131,7 @@ float float32_distance_l2_impl_rvv (const void *v1, const void *v2, int n, bool 
     // Iterate by VL elements
     for (size_t i = n; i > 0; i -= vl) {
         // Use LMUL=8, we have 4 registers to work with.
-        vl = __riscv_vsetvl_e32m8(n);
+        vl = __riscv_vsetvl_e32m8(i);
 
         // Load the vectors into the registers
         vfloat32m8_t va = __riscv_vle32_v_f32m8(a, vl);
@@ -146,7 +170,7 @@ float float32_distance_l1_rvv (const void *v1, const void *v2, int n) {
     // Iterate by VL elements
     for (size_t i = n; i > 0; i -= vl) {
         // Use LMUL=8, we have 4 registers to work with.
-        vl = __riscv_vsetvl_e32m8(n);
+        vl = __riscv_vsetvl_e32m8(i);
 
         // Load the vectors into the registers
         vfloat32m8_t va = __riscv_vle32_v_f32m8(a, vl);
@@ -427,34 +451,129 @@ float float16_distance_cosine_rvv (const void *v1, const void *v2, int n) {
 
 // MARK: - BFLOAT16 -
 
+static inline float bfloat16_distance_l2_impl_rvv(const void *v1, const void *v2, int n, bool use_sqrt) {
+    const uint16_t *a = (const uint16_t *)v1;
+    const uint16_t *b = (const uint16_t *)v2;
+
+    size_t vl = __riscv_vsetvlmax_e64m4();
+    vfloat64m4_t vsum = __riscv_vfmv_v_f_f64m4(0.0, vl);
+
+    for (size_t i = n; i > 0;) {
+        // Load as f32m2 and widen to f64m4 to avoid overflow in accumulation.
+        vl = __riscv_vsetvl_e32m2(i);
+        vfloat32m2_t va32 = rvv_load_bf16_as_f32m2(a, vl);
+        vfloat32m2_t vb32 = rvv_load_bf16_as_f32m2(b, vl);
+        vfloat64m4_t va = __riscv_vfwcvt_f_f_v_f64m4(va32, vl);
+        vfloat64m4_t vb = __riscv_vfwcvt_f_f_v_f64m4(vb32, vl);
+        
+        vl = __riscv_vsetvl_e64m4(vl);
+
+        vfloat64m4_t vdiff = __riscv_vfsub_vv_f64m4(va, vb, vl);
+
+        // If any diff lane is infinite, return +INFINITY.
+        vuint64m4_t d_class = __riscv_vfclass_v_u64m4(vdiff, vl);
+        vbool16_t d_inf = __riscv_vmsne_vx_u64m4_b16(__riscv_vand_vx_u64m4(d_class, 0x81u, vl), 0u, vl);
+        if (__riscv_vfirst_m_b16(d_inf, vl) >= 0) return INFINITY;
+
+        // Skip NaN diff lanes.
+        vbool16_t not_nan = __riscv_vmfeq_vv_f64m4_b16(vdiff, vdiff, vl);
+        vsum = __riscv_vfmacc_vv_f64m4_m(not_nan, vsum, vdiff, vdiff, vl);
+
+        a += vl;
+        b += vl;
+        i -= vl;
+    }
+
+    double l2sq = float64_sum_vector_f64m4(vsum, n);
+    return use_sqrt ? sqrtf((float)l2sq) : (float)l2sq;
+}
+
 float bfloat16_distance_l2_rvv (const void *v1, const void *v2, int n) {
-    printf("bfloat16_distance_l2_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+    return bfloat16_distance_l2_impl_rvv(v1, v2, n, true);
 }
 
 float bfloat16_distance_l2_squared_rvv (const void *v1, const void *v2, int n) {
-    printf("bfloat16_distance_l2_squared_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+    return bfloat16_distance_l2_impl_rvv(v1, v2, n, false);
 }
 
 float bfloat16_distance_l1_rvv (const void *v1, const void *v2, int n) {
-    printf("bfloat16_distance_l1_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+    const uint16_t *a = (const uint16_t *)v1;
+    const uint16_t *b = (const uint16_t *)v2;
+
+    size_t vl = __riscv_vsetvlmax_e32m8();
+    vfloat32m8_t vsum = __riscv_vfmv_v_f_f32m8(0.0f, vl);
+
+    for (size_t i = n; i > 0;) {
+        vl = __riscv_vsetvl_e32m8(i);
+        vfloat32m8_t va = rvv_load_bf16_as_f32m8(a, vl);
+        vfloat32m8_t vb = rvv_load_bf16_as_f32m8(b, vl);
+
+        vfloat32m8_t vdiff = __riscv_vfsub_vv_f32m8(va, vb, vl);
+        vfloat32m8_t vabs = __riscv_vfabs_v_f32m8(vdiff, vl);
+        vsum = __riscv_vfadd_vv_f32m8(vsum, vabs, vl);
+
+        a += vl;
+        b += vl;
+        i -= vl;
+    }
+
+    return float32_sum_vector_f32m8(vsum, n);
 }
 
 float bfloat16_distance_dot_rvv (const void *v1, const void *v2, int n) {
-    printf("bfloat16_distance_dot_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+    const uint16_t *a = (const uint16_t *)v1;
+    const uint16_t *b = (const uint16_t *)v2;
+
+    size_t vl = __riscv_vsetvlmax_e32m8();
+    vfloat32m8_t vdot = __riscv_vfmv_v_f_f32m8(0.0f, vl);
+
+    for (size_t i = n; i > 0;) {
+        vl = __riscv_vsetvl_e32m8(i);
+        vfloat32m8_t va = rvv_load_bf16_as_f32m8(a, vl);
+        vfloat32m8_t vb = rvv_load_bf16_as_f32m8(b, vl);
+        vdot = __riscv_vfmacc_vv_f32m8(vdot, va, vb, vl);
+
+        a += vl;
+        b += vl;
+        i -= vl;
+    }
+
+    float dot = float32_sum_vector_f32m8(vdot, n);
+    return -dot;
 }
 
 float bfloat16_distance_cosine_rvv (const void *v1, const void *v2, int n) {
-    printf("bfloat16_distance_cosine_rvv: unimplemented\n");
-    abort();
-    return 0.0f;
+    const uint16_t *a = (const uint16_t *)v1;
+    const uint16_t *b = (const uint16_t *)v2;
+
+    size_t vl = __riscv_vsetvlmax_e32m4();
+    vfloat32m4_t vdot = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+    vfloat32m4_t vnx = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+    vfloat32m4_t vny = __riscv_vfmv_v_f_f32m4(0.0f, vl);
+
+    for (size_t i = n; i > 0;) {
+        vl = __riscv_vsetvl_e32m4(i);
+        vfloat32m4_t va = rvv_load_bf16_as_f32m4(a, vl);
+        vfloat32m4_t vb = rvv_load_bf16_as_f32m4(b, vl);
+
+        vdot = __riscv_vfmacc_vv_f32m4(vdot, va, vb, vl);
+        vnx = __riscv_vfmacc_vv_f32m4(vnx, va, va, vl);
+        vny = __riscv_vfmacc_vv_f32m4(vny, vb, vb, vl);
+
+        a += vl;
+        b += vl;
+        i -= vl;
+    }
+
+    float dot = float32_sum_vector_f32m4(vdot, n);
+    float norm_x = float32_sum_vector_f32m4(vnx, n);
+    float norm_y = float32_sum_vector_f32m4(vny, n);
+    if (norm_x == 0.0f || norm_y == 0.0f) return 1.0f;
+
+    float cosine_similarity = dot / (sqrtf(norm_x) * sqrtf(norm_y));
+    if (cosine_similarity > 1.0f) cosine_similarity = 1.0f;
+    if (cosine_similarity < -1.0f) cosine_similarity = -1.0f;
+    return 1.0f - cosine_similarity;
 }
 
 // MARK: - UINT8 -
@@ -847,7 +966,7 @@ float bit1_distance_hamming_rvv (const void *v1, const void *v2, int n) {
     // Iterate by VL elements
     for (size_t i = n; i > 0; i -= vl) {
         // Use LMUL=8, we have 4 registers to work with.
-        vl = __riscv_vsetvl_e64m8(n);
+        vl = __riscv_vsetvl_e64m8(i);
 
         // Load the vectors into the registers and cast them into a u64 inplace
         vuint64m8_t va = __riscv_vreinterpret_v_u8m8_u64m8(__riscv_vle8_v_u8m8(a, vl));
@@ -874,31 +993,31 @@ void init_distance_functions_rvv (void) {
 #if defined(__riscv_v_intrinsic)
     dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_F32] = float32_distance_l2_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_F16] = float16_distance_l2_rvv;
-    // dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_U8] = uint8_distance_l2_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L2][VECTOR_TYPE_I8] = int8_distance_l2_rvv;
     
     dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_F32] = float32_distance_l2_squared_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_F16] = float16_distance_l2_squared_rvv;
-    // dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_squared_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_BF16] = bfloat16_distance_l2_squared_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_U8] = uint8_distance_l2_squared_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_SQUARED_L2][VECTOR_TYPE_I8] = int8_distance_l2_squared_rvv;
     
     dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_F32] = float32_distance_cosine_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_F16] = float16_distance_cosine_rvv;
-    // dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_BF16] = bfloat16_distance_cosine_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_BF16] = bfloat16_distance_cosine_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_U8] = uint8_distance_cosine_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_COSINE][VECTOR_TYPE_I8] = int8_distance_cosine_rvv;
     
     dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_F32] = float32_distance_dot_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_F16] = float16_distance_dot_rvv;
-    // dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_BF16] = bfloat16_distance_dot_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_BF16] = bfloat16_distance_dot_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_U8] = uint8_distance_dot_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_DOT][VECTOR_TYPE_I8] = int8_distance_dot_rvv;
     
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_F32] = float32_distance_l1_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_F16] = float16_distance_l1_rvv;
-    // dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_rvv;
+    dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_BF16] = bfloat16_distance_l1_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_U8] = uint8_distance_l1_rvv;
     dispatch_distance_table[VECTOR_DISTANCE_L1][VECTOR_TYPE_I8] = int8_distance_l1_rvv;
     
