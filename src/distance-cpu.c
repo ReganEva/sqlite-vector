@@ -928,9 +928,7 @@ void init_distance_functions (bool force_cpu) {
         init_distance_functions_neon();
     }
     #elif defined(__riscv) || defined(__riscv__)
-    printf("RISC-V detected\n");
     if (cpu_supports_rvv()) {
-        printf("RISC-V RVV detected\n");
         init_distance_functions_rvv();
     }
     #endif
