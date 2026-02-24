@@ -96,6 +96,12 @@ else # linux
 	STRIP = strip --strip-unneeded $@
 endif
 
+# For RISC-V pass through the arch string directly to march
+ifneq (,$(findstring rv64,$(ARCH)))
+	LDFLAGS += -march=$(ARCH)
+	CFLAGS += -march=$(ARCH)
+endif
+
 # Windows .def file generation
 $(DEF_FILE):
 ifeq ($(PLATFORM),windows)

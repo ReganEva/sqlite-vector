@@ -17,6 +17,7 @@
 #include "distance-sse2.h"
 #include "distance-avx2.h"
 #include "distance-avx512.h"
+#include "distance-rvv.h"
 
 const char *distance_backend_name = "CPU";
 distance_function_t dispatch_distance_table[VECTOR_DISTANCE_MAX][VECTOR_TYPE_MAX] = {0};
@@ -828,7 +829,14 @@ float bit1_distance_hamming_cpu (const void *v1, const void *v2, int n) {
         x86_cpuid(1, 0, &eax, &ebx, &ecx, &edx);
         return (edx & (1 << 26)) != 0;  // SSE2
     }
-
+#elif defined(__riscv) || defined(__riscv__)
+    #include <sys/auxv.h>
+    #define ISA_V_HWCAP (1 << ('v' - 'a'))
+    
+    bool cpu_supports_rvv (void) {    
+        unsigned long hw_cap = getauxval(AT_HWCAP);
+        return (hw_cap & ISA_V_HWCAP) != 0;
+    }
 #else
     // For ARM (NEON is always present on aarch64, runtime detection rarely needed)
     #if defined(__aarch64__) || defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -844,7 +852,7 @@ float bit1_distance_hamming_cpu (const void *v1, const void *v2, int n) {
         #include <sys/auxv.h>
         #include <asm/hwcap.h>
         bool cpu_supports_neon (void) {
-            #ifdef AT_HWCAP
+            #if defined(AT_HWCAP) && defined(HWCAP_NEON)
             return (getauxval(AT_HWCAP) & HWCAP_NEON) != 0;
             #else
             return false;
@@ -918,6 +926,10 @@ void init_distance_functions (bool force_cpu) {
     #elif defined(__ARM_NEON) || defined(__aarch64__)
     if (cpu_supports_neon()) {
         init_distance_functions_neon();
+    }
+    #elif defined(__riscv) || defined(__riscv__)
+    if (cpu_supports_rvv()) {
+        init_distance_functions_rvv();
     }
     #endif
 }
